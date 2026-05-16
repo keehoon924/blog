@@ -58,9 +58,9 @@ ipcMain.handle('post:generate', async (event, { keyword, style, category }) => {
   }
 });
 
-ipcMain.handle('post:humanize', async (event, { title, content }) => {
+ipcMain.handle('post:humanize', async (event, { title, content, keyword }) => {
   try {
-    const result = await humanizePost(title, content);
+    const result = await humanizePost(title, content, keyword || '');
     return { success: true, data: result };
   } catch (err) {
     return { success: false, error: err.message };

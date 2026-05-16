@@ -119,7 +119,8 @@ async function handleHumanize() {
   setStatus('AI 감지 우회 처리 중...', true);
   document.getElementById('humanizeBtn').disabled = true;
 
-  const res = await api.humanizePost({ title, content });
+  const keyword = document.getElementById('keywordInput').value.trim();
+  const res = await api.humanizePost({ title, content, keyword });
 
   if (!res.success) {
     setStatus('');
