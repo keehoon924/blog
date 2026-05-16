@@ -54,13 +54,16 @@ async function clickToolbarButton(page, label) {
   const selectors = [
     `[title="${label}"]`,
     `[aria-label="${label}"]`,
+    `button:has-text("${label}")`,
     `.se-toolbar button:has-text("${label}")`,
+    `.se-toolbar-item:has-text("${label}")`,
     `button[data-type="${label}"]`,
   ];
   for (const sel of selectors) {
     try {
       const el = await page.$(sel);
       if (el) {
+        await el.scrollIntoViewIfNeeded();
         await el.click();
         await page.waitForTimeout(400);
         return true;
@@ -82,16 +85,16 @@ async function insertQuote(page, quoteRaw) {
     await page.waitForTimeout(300);
     await slowType(page, quoteText);
     if (attribution) {
-      // SE5 인용구 블록의 출처 필드로 이동 (Tab)
-      await page.keyboard.press('Tab');
-      await page.waitForTimeout(200);
+      // 같은 블록 안에서 Enter로 줄 분리 (Tab은 SE5에서 출처 필드 없음)
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(150);
       await slowType(page, attribution);
     }
     // 인용구 블록 탈출: Escape → ArrowDown → Enter
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(250);
     await page.keyboard.press('ArrowDown');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(250);
     await page.keyboard.press('Enter');
     await page.waitForTimeout(300);
   } else {
@@ -291,12 +294,16 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config }
   await focusContentArea(page);
   await page.waitForTimeout(400);
 
-  // ── Step 2-1: 가운데 맞춤 설정 ────────────────────────────────
-  await page.keyboard.press('Control+e');
-  await page.waitForTimeout(200);
-
   // ── Step 3: Type content with markers ──────────────────────────
   await typeContentWithMarkers(page, content);
+
+  // ── Step 3-1: 전체 가운데 맞춤 (모든 단락에 일괄 적용) ────────
+  await page.keyboard.press('Control+a');
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Control+e');
+  await page.waitForTimeout(200);
+  await page.keyboard.press('End');
+  await page.waitForTimeout(200);
 
   // ── Step 4: Hashtags ───────────────────────────────────────────
   await typeHashtags(page, hashtags);
