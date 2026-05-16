@@ -4,52 +4,120 @@ const fs = require('fs');
 
 const SESSION_FILE = path.join(process.cwd(), 'naver-session.json');
 
-// Parse content into segments: [{text, bold}]
-function parseSegments(content) {
+// Parse bold segments: [{text, bold}]
+function parseSegments(text) {
   const segments = [];
   const regex = /\*\*([^*\n]+)\*\*/g;
   let lastIndex = 0;
   let match;
-
-  while ((match = regex.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      segments.push({ text: content.slice(lastIndex, match.index), bold: false });
-    }
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) segments.push({ text: text.slice(lastIndex, match.index), bold: false });
     segments.push({ text: match[1], bold: true });
     lastIndex = match.index + match[0].length;
   }
-  if (lastIndex < content.length) {
-    segments.push({ text: content.slice(lastIndex), bold: false });
-  }
+  if (lastIndex < text.length) segments.push({ text: text.slice(lastIndex), bold: false });
   return segments;
 }
 
-// Remove image placeholders from typed content
+// Remove image placeholders
 function stripImagePlaceholders(content) {
-  return content.replace(/\[이미지:[^\]]*\]/g, '\n').replace(/\n{3,}/g, '\n\n');
+  return content.replace(/\[이미지:[^\]]*\]/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-async function typeWithFormatting(page, content) {
-  const cleaned = stripImagePlaceholders(content);
-  const segments = parseSegments(cleaned);
-  let isBold = false;
+async function slowType(page, text) {
+  const chunks = text.match(/[\s\S]{1,100}/g) || [text];
+  for (const chunk of chunks) {
+    await page.keyboard.type(chunk, { delay: 18 });
+    await page.waitForTimeout(80);
+  }
+}
 
-  for (const segment of segments) {
-    if (segment.bold !== isBold) {
+async function typeWithFormatting(page, text) {
+  const segments = parseSegments(text);
+  let isBold = false;
+  for (const seg of segments) {
+    if (seg.bold !== isBold) {
       await page.keyboard.press('Control+b');
-      isBold = segment.bold;
+      isBold = seg.bold;
       await page.waitForTimeout(80);
     }
-    const chunks = segment.text.match(/[\s\S]{1,150}/g) || [segment.text];
-    for (const chunk of chunks) {
-      await page.keyboard.type(chunk, { delay: 20 });
-      await page.waitForTimeout(100);
-    }
+    await slowType(page, seg.text);
   }
-
   if (isBold) {
     await page.keyboard.press('Control+b');
     await page.waitForTimeout(80);
+  }
+}
+
+// Click toolbar button by label text
+async function clickToolbarButton(page, label) {
+  const selectors = [
+    `[title="${label}"]`,
+    `[aria-label="${label}"]`,
+    `.se-toolbar button:has-text("${label}")`,
+    `button[data-type="${label}"]`,
+  ];
+  for (const sel of selectors) {
+    try {
+      const el = await page.$(sel);
+      if (el) {
+        await el.click();
+        await page.waitForTimeout(400);
+        return true;
+      }
+    } catch { /* try next */ }
+  }
+  return false;
+}
+
+// Insert 인용구 (blockquote) via toolbar
+async function insertQuote(page, quoteText) {
+  const clicked = await clickToolbarButton(page, '인용구');
+  if (clicked) {
+    await page.waitForTimeout(300);
+    await slowType(page, quoteText);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+  } else {
+    // Fallback: text-based quote
+    await page.keyboard.type(`❝ ${quoteText} ❞`);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+  }
+}
+
+// Insert 구분선 (divider) via toolbar
+async function insertDivider(page) {
+  const clicked = await clickToolbarButton(page, '구분선');
+  if (!clicked) {
+    // Fallback: dash line
+    await page.keyboard.type('─────────────────────────');
+    await page.keyboard.press('Enter');
+  }
+  await page.waitForTimeout(200);
+}
+
+// Parse and type content with [구분선] and [인용구: text] markers
+async function typeContentWithMarkers(page, content) {
+  const cleaned = stripImagePlaceholders(content);
+  const markerRegex = /\[구분선\]|\[인용구:([^\]]+)\]/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = markerRegex.exec(cleaned)) !== null) {
+    if (match.index > lastIndex) {
+      await typeWithFormatting(page, cleaned.slice(lastIndex, match.index));
+    }
+    if (match[0] === '[구분선]') {
+      await insertDivider(page);
+    } else {
+      await insertQuote(page, match[1].trim());
+    }
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < cleaned.length) {
+    await typeWithFormatting(page, cleaned.slice(lastIndex));
   }
 }
 
@@ -62,14 +130,13 @@ async function typeHashtags(page, hashtags) {
 
 async function typeRelatedPosts(page, relatedPosts) {
   if (!relatedPosts || relatedPosts.length === 0) return;
-
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
+  await insertDivider(page);
   await page.keyboard.press('Control+b');
   await page.keyboard.type('▼ 함께 읽으면 좋은 글', { delay: 20 });
   await page.keyboard.press('Control+b');
   await page.keyboard.press('Enter');
-
   for (const post of relatedPosts) {
     await page.keyboard.type(`• ${post.title}`, { delay: 20 });
     await page.keyboard.press('Enter');
@@ -86,35 +153,70 @@ async function doLogin(page, id, pw) {
     await page.keyboard.type(char);
     await page.waitForTimeout(30 + Math.floor(Math.random() * 70));
   }
-
   await page.click('#pw');
   await page.waitForTimeout(300);
   for (const char of pw) {
     await page.keyboard.type(char);
     await page.waitForTimeout(30 + Math.floor(Math.random() * 70));
   }
-
   await page.waitForTimeout(500);
   await page.click('.btn_login');
 
-  // Wait until fully out of nid.naver.com (handles 2FA — up to 120s)
+  // Wait for 2FA / full login (up to 120s)
   await page.waitForFunction(
     () => !window.location.hostname.includes('nid.naver.com'),
     { timeout: 120000 }
   );
 }
 
+async function focusContentArea(page) {
+  // Method 1: evaluate — find contenteditable below the title (y > 250)
+  const focused = await page.evaluate(() => {
+    const editables = Array.from(document.querySelectorAll('[contenteditable="true"]'));
+    for (const el of editables) {
+      if (el.closest('.se-documentTitle') || (el.className && el.className.includes('title'))) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.top > 250 && rect.width > 300) {
+        el.click();
+        el.focus();
+        return true;
+      }
+    }
+    return false;
+  });
+
+  if (focused) return;
+
+  // Method 2: try known content selectors
+  const contentSelectors = [
+    '.se-text-paragraph',
+    '.se-section-text [contenteditable]',
+    '.se-content-area',
+  ];
+  for (const sel of contentSelectors) {
+    const el = await page.$(sel);
+    if (el) {
+      await el.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await el.click({ force: true });
+      return;
+    }
+  }
+
+  // Method 3: mouse click at center-bottom of visible area
+  const vp = page.viewportSize();
+  await page.mouse.click(vp ? vp.width / 2 : 640, 500);
+}
+
 async function publishToNaver({ title, content, hashtags, relatedPosts, config }) {
   const naverID = config.naverID || process.env.NAVER_ID;
   const naverPW = config.naverPW || process.env.NAVER_PW;
 
-  if (!naverID || !naverPW) {
-    throw new Error('네이버 아이디/비밀번호가 설정되지 않았습니다.');
-  }
+  if (!naverID || !naverPW) throw new Error('네이버 아이디/비밀번호가 설정되지 않았습니다.');
 
   const browser = await chromium.launch({
     headless: false,
-    slowMo: 30,
+    slowMo: 20,
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
   });
 
@@ -123,10 +225,7 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config }
     viewport: { width: 1280, height: 900 },
     extraHTTPHeaders: { 'Accept-Language': 'ko-KR,ko;q=0.9' },
   };
-
-  if (fs.existsSync(SESSION_FILE)) {
-    contextOptions.storageState = SESSION_FILE;
-  }
+  if (fs.existsSync(SESSION_FILE)) contextOptions.storageState = SESSION_FILE;
 
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
@@ -141,75 +240,51 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config }
     await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
   }
 
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(2500);
 
-  // Type title
+  // ── Step 1: Type title ──────────────────────────────────────────
   const titleSelectors = ['.se-documentTitle-inputArea', '.se-title-text', '[placeholder*="제목"]'];
   for (const sel of titleSelectors) {
     const el = await page.$(sel);
     if (el) {
       await el.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(400);
       await el.click();
       await page.waitForTimeout(500);
+      // Clear existing
+      await page.keyboard.press('Control+a');
+      await page.keyboard.press('Backspace');
+      await page.waitForTimeout(200);
       for (const char of title) {
         await page.keyboard.type(char);
-        await page.waitForTimeout(30 + Math.floor(Math.random() * 50));
+        await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
       }
       break;
     }
   }
 
   await page.waitForTimeout(800);
-  await page.keyboard.press('Tab');
-  await page.waitForTimeout(800);
 
-  // Verify focus moved to content area
-  let typed = false;
-  try {
-    await page.keyboard.type('ㄱ', { delay: 50 });
-    await page.waitForTimeout(150);
-    await page.keyboard.press('Backspace');
-    await page.waitForTimeout(150);
-    typed = true;
-  } catch { /* continue */ }
+  // ── Step 2: Move to content area (NO Tab — click explicitly) ──
+  await focusContentArea(page);
+  await page.waitForTimeout(600);
 
-  if (!typed) {
-    const contentSelectors = [
-      '.se-text-paragraph', '.se-content-area', '.se-main-container',
-      '[contenteditable="true"]:not([class*="title"])',
-    ];
-    for (const sel of contentSelectors) {
-      const el = await page.$(sel);
-      if (el) {
-        await el.scrollIntoViewIfNeeded();
-        await page.waitForTimeout(400);
-        await el.click({ force: true });
-        await page.waitForTimeout(400);
-        typed = true;
-        break;
-      }
-    }
-  }
+  // Confirm focus landed on content (not title) by typing a test char
+  await page.keyboard.type('ㄱ');
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(200);
 
-  if (!typed) {
-    for (const frame of page.frames()) {
-      try {
-        const body = await frame.$('body[contenteditable="true"]');
-        if (body) { await body.click(); typed = true; break; }
-      } catch { /* skip */ }
-    }
-  }
+  // ── Step 3: Type content with markers ──────────────────────────
+  await typeContentWithMarkers(page, content);
 
-  // Type content with bold formatting
-  await typeWithFormatting(page, content);
-
-  // Add hashtags
+  // ── Step 4: Hashtags ───────────────────────────────────────────
   await typeHashtags(page, hashtags);
 
-  // Add related posts section
+  // ── Step 5: Related posts ──────────────────────────────────────
   await typeRelatedPosts(page, relatedPosts);
 
-  // Browser stays open — user adds images and clicks publish manually
+  // Browser stays open — user adds images and clicks publish
 }
 
 module.exports = { publishToNaver };
