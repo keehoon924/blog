@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>대시보드</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .slot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+    .slot-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .slot-time { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .slot-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; min-height: 44px; }
+    .slot-empty { color: var(--muted); font-size: 14px; }
+    .mode-btns { display: flex; gap: 12px; margin-bottom: 24px; }
+    .mode-btns .btn { flex: 1; justify-content: center; padding: 14px; font-size: 15px; }
+    .keywords-wrap { margin-bottom: 0; }
+    .keywords-title { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+    .keywords-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .keyword-chip {
+      padding: 6px 14px; border-radius: 20px;
+      background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3);
+      color: var(--accent); font-size: 13px; cursor: pointer; transition: all 0.15s;
+    }
+    .keyword-chip:hover { background: rgba(59,130,246,0.25); }
+    .section-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="nav-brand">📝 블로그 자동화</span>
+    <div class="nav-links">
+      <button class="active" onclick="api.navigate('dashboard')">대시보드</button>
+      <button onclick="api.navigate('write')">글쓰기</button>
+      <button onclick="api.navigate('history')">발행 이력</button>
+      <button onclick="api.navigate('settings')">설정</button>
+    </div>
+  </nav>
+
+  <main>
+    <div class="mode-btns">
+      <button class="btn btn-primary" onclick="api.navigate('write')">⚡ 반자동 모드</button>
+      <button class="btn btn-outline" onclick="alert('완전자동 모드는 2단계에서 추가됩니다.')">🤖 완전자동 모드</button>
+    </div>
+
+    <p class="section-title">오늘의 발행 현황</p>
+    <div class="slot-grid" id="slotGrid">
+      <div class="slot-card">
+        <div class="slot-time">🌅 아침 (09:00)</div>
+        <div class="slot-title slot-empty">비어있음</div>
+      </div>
+      <div class="slot-card">
+        <div class="slot-time">☀️ 점심 (12:00)</div>
+        <div class="slot-title slot-empty">비어있음</div>
+      </div>
+      <div class="slot-card">
+        <div class="slot-time">🌆 저녁 (18:00)</div>
+        <div class="slot-title slot-empty">비어있음</div>
+      </div>
+    </div>
+
+    <div class="card keywords-wrap">
+      <div class="keywords-title">🔥 추천 키워드 (DataLab API 연동 전 샘플)</div>
+      <div class="keywords-list" id="keywordsList"></div>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+  <script src="js/dashboard.js"></script>
+</body>
+</html>

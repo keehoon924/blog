@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>발행 이력</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .history-list { display: flex; flex-direction: column; gap: 12px; }
+    .history-item {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px 20px;
+      display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start;
+      cursor: pointer; transition: border-color 0.15s;
+    }
+    .history-item:hover { border-color: var(--accent); }
+    .history-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .history-meta { font-size: 12px; color: var(--muted); display: flex; gap: 12px; }
+    .history-right { text-align: right; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+    .empty-state p { margin-bottom: 16px; font-size: 15px; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 24px; width: 680px; max-height: 80vh;
+      overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+    }
+    .modal-title { font-size: 18px; font-weight: 700; }
+    .modal-content { font-size: 14px; line-height: 1.8; color: var(--muted); white-space: pre-wrap; }
+    .modal-close { align-self: flex-end; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="nav-brand">📝 블로그 자동화</span>
+    <div class="nav-links">
+      <button onclick="api.navigate('dashboard')">대시보드</button>
+      <button onclick="api.navigate('write')">글쓰기</button>
+      <button class="active">발행 이력</button>
+      <button onclick="api.navigate('settings')">설정</button>
+    </div>
+  </nav>
+
+  <main>
+    <div id="historyList" class="history-list"></div>
+  </main>
+
+  <!-- Post detail modal -->
+  <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+    <div class="modal">
+      <div class="modal-title" id="modalTitle"></div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <span class="badge" id="modalBadge"></span>
+        <span style="font-size:12px; color:var(--muted);" id="modalDate"></span>
+      </div>
+      <div class="modal-content" id="modalContent"></div>
+      <button class="btn btn-outline btn-sm modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">닫기</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <script src="js/history.js"></script>
+</body>
+</html>
