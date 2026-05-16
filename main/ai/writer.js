@@ -114,9 +114,13 @@ const COMMON_RULES = `
 - 맛집·여행 카테고리: 장소명을 [장소: 가게명 또는 장소명] 형식으로 표시
 - 공식 사이트나 예약 페이지가 있으면 [링크: 표시텍스트] 형식으로 표시`;
 
-async function generatePost(keyword, style, category = 'other', learningBoost = '') {
+async function generatePost(keyword, style, category = 'other', learningBoost = '', relatedKeywords = []) {
   const client = getClient();
   const cat = CATEGORIES[category] || CATEGORIES.other;
+
+  const lsiStr = relatedKeywords.length > 0
+    ? `\n- LSI 연관 키워드 (자연스럽게 2~3회 삽입): ${relatedKeywords.join(', ')}`
+    : '';
 
   const systemPrompt = `당신은 네이버 블로그 전문 작가입니다. 카테고리: ${cat.name}
 
@@ -128,10 +132,11 @@ async function generatePost(keyword, style, category = 'other', learningBoost = 
 5. 구조: ${cat.structure}
 6. 어조 예시: ${cat.toneExamples}
 
-【SEO 규칙】
-- 첫 단락 100자 이내에 핵심 키워드 1회 등장
-- 본문 전체에 키워드 3~7회 자연스럽게 반복 (동의어·연관어 포함)
-- 소제목에 키워드 또는 연관어 포함
+【SEO 규칙 — 키워드: "${keyword}"】
+- 제목: "${keyword}" 반드시 포함, 제목 앞 15자 이내에 위치
+- 첫 문장: "${keyword}" 반드시 등장 (첫 50자 이내)
+- 본문: "${keyword}" 정확히 3~5회 반복 (동의어 대체 금지 — 정확한 단어 사용)
+- 소제목 1개 이상에 "${keyword}" 또는 직접 연관어 포함${lsiStr}
 
 【네이버 홈판 최적화】
 - 이미지 삽입 위치마다 [이미지: ${cat.imageHint}] 로 표시 (소제목마다 1개)

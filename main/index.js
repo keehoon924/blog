@@ -6,6 +6,7 @@ const { initDB, savePost, getPosts, getPost, updatePostStatus, updatePostNaverUr
 const { generatePost } = require('./ai/writer');
 const { humanizePost } = require('./ai/humanizer');
 const { getLearningBoost } = require('./ai/learner');
+const { analyzeKeyword } = require('./keywords/analyzer');
 const { publishToNaver } = require('./playwright/publisher');
 const { loadConfig, saveConfig } = require('./config');
 const { startScheduler, runPerformanceCheck } = require('./scheduler');
@@ -51,8 +52,10 @@ ipcMain.handle('navigate', (event, page) => {
 ipcMain.handle('post:generate', async (event, { keyword, style, category }) => {
   try {
     const learningBoost = getLearningBoost(category || 'other');
-    const result = await generatePost(keyword, style, category || 'other', learningBoost);
-    return { success: true, data: result };
+    const { lsi, longtail } = await analyzeKeyword(keyword);
+    const relatedKeywords = [...longtail, ...lsi].slice(0, 6);
+    const result = await generatePost(keyword, style, category || 'other', learningBoost, relatedKeywords);
+    return { success: true, data: result, relatedKeywords };
   } catch (err) {
     return { success: false, error: err.message };
   }
