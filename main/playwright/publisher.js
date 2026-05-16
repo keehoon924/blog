@@ -87,20 +87,25 @@ async function insertQuote(page, quoteText) {
 }
 
 // Insert 구분선 (divider) via toolbar
-async function insertDivider(page) {
+// isShort=true: 짧은 구분선 (문단 사이), isShort=false: 긴 구분선 (섹션 전환)
+async function insertDivider(page, isShort = false) {
+  if (isShort) {
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    return;
+  }
   const clicked = await clickToolbarButton(page, '구분선');
   if (!clicked) {
-    // Fallback: dash line
     await page.keyboard.type('─────────────────────────');
     await page.keyboard.press('Enter');
   }
   await page.waitForTimeout(200);
 }
 
-// Parse and type content with [구분선] and [인용구: text] markers
+// Parse and type content with [구분선], [짧은구분선], [인용구: text] markers
 async function typeContentWithMarkers(page, content) {
   const cleaned = stripImagePlaceholders(content);
-  const markerRegex = /\[구분선\]|\[인용구:([^\]]+)\]/g;
+  const markerRegex = /\[구분선\]|\[짧은구분선\]|\[인용구:([^\]]+)\]/g;
   let lastIndex = 0;
   let match;
 
@@ -109,7 +114,9 @@ async function typeContentWithMarkers(page, content) {
       await typeWithFormatting(page, cleaned.slice(lastIndex, match.index));
     }
     if (match[0] === '[구분선]') {
-      await insertDivider(page);
+      await insertDivider(page, false);
+    } else if (match[0] === '[짧은구분선]') {
+      await insertDivider(page, true);
     } else {
       await insertQuote(page, match[1].trim());
     }
@@ -170,28 +177,24 @@ async function doLogin(page, id, pw) {
 }
 
 async function focusContentArea(page) {
-  // Method 1: evaluate — find contenteditable below the title (y > 250)
-  const focused = await page.evaluate(() => {
-    const editables = Array.from(document.querySelectorAll('[contenteditable="true"]'));
-    for (const el of editables) {
-      if (el.closest('.se-documentTitle') || (el.className && el.className.includes('title'))) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.top > 250 && rect.width > 300) {
-        el.click();
-        el.focus();
-        return true;
-      }
-    }
-    return false;
+  // Strategy 1: Enter from title naturally moves SE5 focus to first body paragraph
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(400);
+
+  const leftTitle = await page.evaluate(() => {
+    const el = document.activeElement;
+    if (!el) return false;
+    const titleEl = document.querySelector('.se-documentTitle');
+    return !(titleEl && titleEl.contains(el));
   });
+  if (leftTitle) return;
 
-  if (focused) return;
-
-  // Method 2: try known content selectors
+  // Strategy 2: click known content-area selectors
   const contentSelectors = [
-    '.se-text-paragraph',
     '.se-section-text [contenteditable]',
-    '.se-content-area',
+    '.se-text-paragraph [contenteditable]',
+    '.se-text-paragraph',
+    '.se-main-section [contenteditable]',
   ];
   for (const sel of contentSelectors) {
     const el = await page.$(sel);
@@ -199,13 +202,23 @@ async function focusContentArea(page) {
       await el.scrollIntoViewIfNeeded();
       await page.waitForTimeout(300);
       await el.click({ force: true });
+      await page.waitForTimeout(200);
       return;
     }
   }
 
-  // Method 3: mouse click at center-bottom of visible area
-  const vp = page.viewportSize();
-  await page.mouse.click(vp ? vp.width / 2 : 640, 500);
+  // Strategy 3: first contenteditable NOT inside title container
+  await page.evaluate(() => {
+    const titleEl = document.querySelector('.se-documentTitle');
+    const editables = Array.from(document.querySelectorAll('[contenteditable="true"]'));
+    for (const el of editables) {
+      if (titleEl && titleEl.contains(el)) continue;
+      el.click();
+      el.focus();
+      return;
+    }
+  });
+  await page.waitForTimeout(200);
 }
 
 async function publishToNaver({ title, content, hashtags, relatedPosts, config }) {
@@ -265,15 +278,9 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config }
 
   await page.waitForTimeout(800);
 
-  // ── Step 2: Move to content area (NO Tab — click explicitly) ──
+  // ── Step 2: Move to content area (Enter from title → SE5 body) ──
   await focusContentArea(page);
-  await page.waitForTimeout(600);
-
-  // Confirm focus landed on content (not title) by typing a test char
-  await page.keyboard.type('ㄱ');
-  await page.waitForTimeout(100);
-  await page.keyboard.press('Backspace');
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(400);
 
   // ── Step 3: Type content with markers ──────────────────────────
   await typeContentWithMarkers(page, content);
