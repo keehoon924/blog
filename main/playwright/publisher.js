@@ -71,29 +71,40 @@ async function clickToolbarButton(page, label) {
 }
 
 // Insert 인용구 (blockquote) via toolbar
-async function insertQuote(page, quoteText) {
+// quoteRaw 형식: "인용문 | – 출처명" 또는 "인용문" (출처 없는 경우)
+async function insertQuote(page, quoteRaw) {
+  const pipeIdx = quoteRaw.indexOf(' | ');
+  const quoteText = pipeIdx !== -1 ? quoteRaw.slice(0, pipeIdx).trim() : quoteRaw.trim();
+  const attribution = pipeIdx !== -1 ? quoteRaw.slice(pipeIdx + 3).trim() : '';
+
   const clicked = await clickToolbarButton(page, '인용구');
   if (clicked) {
     await page.waitForTimeout(300);
     await slowType(page, quoteText);
+    if (attribution) {
+      // SE5 인용구 블록의 출처 필드로 이동 (Tab)
+      await page.keyboard.press('Tab');
+      await page.waitForTimeout(200);
+      await slowType(page, attribution);
+    }
+    // 인용구 블록 탈출: Escape → ArrowDown → Enter
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(200);
     await page.keyboard.press('Enter');
-    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
   } else {
-    // Fallback: text-based quote
-    await page.keyboard.type(`❝ ${quoteText} ❞`);
+    // Fallback: 텍스트 형태
+    const full = attribution ? `${quoteText}\n${attribution}` : quoteText;
+    await page.keyboard.type(`❝ ${full} ❞`);
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
   }
 }
 
-// Insert 구분선 (divider) via toolbar
-// isShort=true: 짧은 구분선 (문단 사이), isShort=false: 긴 구분선 (섹션 전환)
-async function insertDivider(page, isShort = false) {
-  if (isShort) {
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(100);
-    return;
-  }
+// Insert 구분선 (divider) via toolbar — 항상 긴 구분선
+async function insertDivider(page) {
   const clicked = await clickToolbarButton(page, '구분선');
   if (!clicked) {
     await page.keyboard.type('─────────────────────────');
@@ -102,7 +113,7 @@ async function insertDivider(page, isShort = false) {
   await page.waitForTimeout(200);
 }
 
-// Parse and type content with [구분선], [짧은구분선], [인용구: text] markers
+// Parse and type content with [구분선] and [인용구: text | 출처] markers
 async function typeContentWithMarkers(page, content) {
   const cleaned = stripImagePlaceholders(content);
   const markerRegex = /\[구분선\]|\[짧은구분선\]|\[인용구:([^\]]+)\]/g;
@@ -113,10 +124,8 @@ async function typeContentWithMarkers(page, content) {
     if (match.index > lastIndex) {
       await typeWithFormatting(page, cleaned.slice(lastIndex, match.index));
     }
-    if (match[0] === '[구분선]') {
-      await insertDivider(page, false);
-    } else if (match[0] === '[짧은구분선]') {
-      await insertDivider(page, true);
+    if (match[0] === '[구분선]' || match[0] === '[짧은구분선]') {
+      await insertDivider(page);
     } else {
       await insertQuote(page, match[1].trim());
     }
@@ -281,6 +290,10 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config }
   // ── Step 2: Move to content area (Enter from title → SE5 body) ──
   await focusContentArea(page);
   await page.waitForTimeout(400);
+
+  // ── Step 2-1: 가운데 맞춤 설정 ────────────────────────────────
+  await page.keyboard.press('Control+e');
+  await page.waitForTimeout(200);
 
   // ── Step 3: Type content with markers ──────────────────────────
   await typeContentWithMarkers(page, content);
