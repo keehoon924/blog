@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>설정</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .settings-wrap { max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    .section-title { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; }
+    .pw-wrap { position: relative; }
+    .pw-wrap input { padding-right: 44px; }
+    .pw-toggle { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; }
+    .save-row { display: flex; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="nav-brand">📝 블로그 자동화</span>
+    <div class="nav-links">
+      <button onclick="api.navigate('dashboard')">대시보드</button>
+      <button onclick="api.navigate('write')">글쓰기</button>
+      <button onclick="api.navigate('history')">발행 이력</button>
+      <button class="active">설정</button>
+    </div>
+  </nav>
+
+  <main>
+    <div class="settings-wrap">
+
+      <!-- 네이버 계정 -->
+      <div class="card">
+        <div class="section-title">🔐 네이버 계정</div>
+        <div class="form-group">
+          <label>네이버 아이디</label>
+          <input type="text" id="naverID" placeholder="네이버 아이디 입력" />
+        </div>
+        <div class="form-group">
+          <label>네이버 비밀번호</label>
+          <div class="pw-wrap">
+            <input type="password" id="naverPW" placeholder="비밀번호 입력" />
+            <button class="pw-toggle" onclick="togglePw('naverPW', this)">👁</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- API 키 -->
+      <div class="card">
+        <div class="section-title">🔑 API 키</div>
+        <div class="form-group">
+          <label>OpenAI API Key</label>
+          <div class="pw-wrap">
+            <input type="password" id="openaiKey" placeholder="sk-..." />
+            <button class="pw-toggle" onclick="togglePw('openaiKey', this)">👁</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>네이버 DataLab Client ID</label>
+          <input type="text" id="datalabClientId" placeholder="Client ID" />
+        </div>
+        <div class="form-group">
+          <label>네이버 DataLab Client Secret</label>
+          <div class="pw-wrap">
+            <input type="password" id="datalabClientSecret" placeholder="Client Secret" />
+            <button class="pw-toggle" onclick="togglePw('datalabClientSecret', this)">👁</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 발행 시간 -->
+      <div class="card">
+        <div class="section-title">⏰ 기본 발행 시간</div>
+        <div class="grid-3">
+          <div class="form-group">
+            <label>🌅 아침</label>
+            <input type="text" id="morningTime" placeholder="09:00" />
+          </div>
+          <div class="form-group">
+            <label>☀️ 점심</label>
+            <input type="text" id="lunchTime" placeholder="12:00" />
+          </div>
+          <div class="form-group">
+            <label>🌆 저녁</label>
+            <input type="text" id="eveningTime" placeholder="18:00" />
+          </div>
+        </div>
+      </div>
+
+      <div class="save-row">
+        <button class="btn btn-primary" onclick="handleSave()">💾 저장</button>
+      </div>
+
+    </div>
+  </main>
+
+  <div id="toast"></div>
+  <script src="js/settings.js"></script>
+</body>
+</html>

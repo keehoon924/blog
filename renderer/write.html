@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>글쓰기</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .write-layout { display: grid; grid-template-columns: 340px 1fr; gap: 20px; height: calc(100vh - 56px - 48px); }
+    .panel-left { display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+    .panel-right { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+    .step-badge { display: inline-block; background: var(--accent); color: #fff; border-radius: 50%; width: 22px; height: 22px; text-align: center; line-height: 22px; font-size: 12px; font-weight: 700; margin-right: 6px; }
+    .card-title { font-size: 14px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; }
+    .result-area { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+    .result-area textarea { flex: 1; min-height: 300px; font-size: 14px; line-height: 1.7; }
+    .action-bar { display: flex; gap: 10px; flex-wrap: wrap; }
+    .style-select { display: flex; gap: 8px; }
+    .style-btn {
+      flex: 1; padding: 8px; border: 1px solid var(--border);
+      border-radius: 8px; background: transparent; color: var(--muted);
+      cursor: pointer; font-size: 13px; transition: all 0.15s;
+    }
+    .style-btn.selected { border-color: var(--accent); color: var(--accent); background: rgba(59,130,246,0.1); }
+    #statusMsg { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; min-height: 22px; }
+    .title-input { font-size: 16px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="nav-brand">📝 블로그 자동화</span>
+    <div class="nav-links">
+      <button onclick="api.navigate('dashboard')">대시보드</button>
+      <button class="active">글쓰기</button>
+      <button onclick="api.navigate('history')">발행 이력</button>
+      <button onclick="api.navigate('settings')">설정</button>
+    </div>
+  </nav>
+
+  <main>
+    <div class="write-layout">
+      <!-- LEFT: Controls -->
+      <div class="panel-left">
+        <div class="card">
+          <div class="card-title"><span class="step-badge">1</span> 키워드 입력</div>
+          <div class="form-group">
+            <input type="text" id="keywordInput" placeholder="예: 자기계발, 재테크 입문..." />
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="step-badge">2</span> 글 스타일</div>
+          <div class="style-select">
+            <button class="style-btn selected" data-style="emotional" onclick="selectStyle(this)">😊 감성체</button>
+            <button class="style-btn" data-style="informative" onclick="selectStyle(this)">📊 정보전달체</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="step-badge">3</span> 글 생성</div>
+          <button class="btn btn-primary" style="width:100%; justify-content:center;" id="generateBtn" onclick="handleGenerate()">
+            ✨ AI 글 생성
+          </button>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="step-badge">4</span> AI 감지 우회</div>
+          <button class="btn btn-outline" style="width:100%; justify-content:center;" id="humanizeBtn" onclick="handleHumanize()" disabled>
+            🔄 자연스럽게 다듬기
+          </button>
+          <p style="font-size:12px; color:var(--muted); margin-top:8px;">생성 후 클릭하면 더 자연스러운 문체로 변환</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="step-badge">5</span> 네이버 발행</div>
+          <button class="btn btn-success" style="width:100%; justify-content:center;" id="publishBtn" onclick="handlePublish()" disabled>
+            🚀 네이버에 올리기
+          </button>
+          <p style="font-size:12px; color:var(--muted); margin-top:8px;">클릭하면 네이버 에디터가 열리고 글이 자동 입력됩니다</p>
+        </div>
+      </div>
+
+      <!-- RIGHT: Content -->
+      <div class="panel-right">
+        <div id="statusMsg"></div>
+        <div class="result-area">
+          <input type="text" class="title-input" id="titleInput" placeholder="제목이 여기에 생성됩니다..." />
+          <textarea id="contentInput" placeholder="본문이 여기에 생성됩니다...&#10;&#10;키워드를 입력하고 'AI 글 생성'을 클릭해보세요."></textarea>
+        </div>
+        <div class="action-bar">
+          <button class="btn btn-outline btn-sm" onclick="handleSaveDraft()">💾 초안 저장</button>
+          <button class="btn btn-outline btn-sm" onclick="clearContent()">🗑 초기화</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+  <script src="js/write.js"></script>
+</body>
+</html>
