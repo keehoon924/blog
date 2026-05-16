@@ -4,45 +4,150 @@ function getClient() {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
 
-const STYLE_PROMPTS = {
-  emotional: '감성적이고 공감을 유발하는 문체로, 독자의 감정에 호소하며 따뜻하고 진솔하게 작성해주세요.',
-  informative: '정보 전달에 집중하는 문체로, 핵심 내용을 명확하고 구체적으로 전달해주세요.',
+const CATEGORIES = {
+  daily: {
+    name: '일상/라이프',
+    style: '친근하고 공감가는 존댓말(-아요/어요체)로, 마치 친구에게 이야기하듯 개인 경험을 에피소드 형식으로 풀어가세요.',
+    structure: '서론(경험 도입, 공감 유도) → 본론(소제목 3~4개, 각 소제목 아래 2~3문단) → 결론(독자 공감 유도 질문)',
+    subheadingFormat: '볼드 텍스트만. 예: **오늘 드디어 해봤어요** / **이게 제일 좋았던 이유** / **솔직한 후기**',
+    toneExamples: '"진짜 대박이에요", "솔직히 말하면", "저도 처음엔 몰랐는데", "어쩌다 보니", "근데 이게 또"',
+    imageHint: '일상 사진, 제품 사진, 장소 분위기 사진',
+  },
+  recipe: {
+    name: '요리/레시피',
+    style: '다정하고 따뜻한 존댓말로, 초보자도 따라할 수 있게 단계별로 친절하게 설명하세요.',
+    structure: '서론(요리 계기 1문단) → **[재료]** 리스트 → **[만드는 법]** 번호 단계(1~N) → **[요리 팁]** → 마무리(완성 소감)',
+    subheadingFormat: '대괄호+볼드. 예: **[재료]** / **[만드는 법]** / **[요리 팁]** / **[완성]**',
+    toneExamples: '"이 단계가 제일 중요해요!", "처음엔 저도 실패했는데요", "꼭 이 순서대로 하세요"',
+    imageHint: '완성된 음식 사진, 각 단계별 조리 사진, 재료 배치 사진',
+  },
+  restaurant: {
+    name: '맛집',
+    style: '생동감 있는 오감 묘사로, 독자가 그 자리에 있는 것처럼 느끼게 현장감 있게 쓰세요.',
+    structure: '서론(방문 계기) → 위치/분위기 → 메뉴 소개(오감 묘사 풍부하게) → 가격/서비스 → **[가게 정보]** 박스(주소/영업시간/휴무) → 총평',
+    subheadingFormat: '정보 아이콘+볼드. 예: **📍 위치 & 분위기** / **🍽️ 시그니처 메뉴** / **💰 가격 & 서비스** / **⏰ 가게 정보**',
+    toneExamples: '"한 입 베어무는 순간 육즙이 팡!", "꼭 드셔보세요!", "재방문 의사 200%", "줄 서서 먹을 가치 있어요"',
+    imageHint: '가게 외관, 인테리어, 메뉴판, 음식 클로즈업',
+  },
+  economy: {
+    name: '경제/정보',
+    style: '신뢰감 있고 단언적인 문체로, 핵심 결론을 먼저 제시하고 근거를 설명하세요. 수치와 데이터를 적극 활용하세요.',
+    structure: '두괄식(핵심 요약 1~2문장) → 번호 논점(각 논점 1~3문장으로 끊어서) → 데이터/사례 → 결론(전망 또는 행동 방향)',
+    subheadingFormat: '번호+볼드. 예: **1. 금리 인상의 세 가지 원인** / **2. 부동산 시장 전망** / **3. 지금 해야 할 것**',
+    toneExamples: '"이미 시작됐습니다", "핵심은 여기에 있습니다", "많은 분들이 모르는 사실이", "솔직히 말씀드리면"',
+    imageHint: '그래프, 통계 이미지, 관련 뉴스 캡처',
+  },
+  book: {
+    name: '책/문학',
+    style: '격조 있고 사색적인 문체로, 독자가 책을 읽고 싶어지게 만드세요. 문학적 표현과 비유를 적극 활용하세요.',
+    structure: '서론(책과의 첫 만남 또는 인상) → **● 이런 내용이에요** (요약) → **● 이 구절이 마음에 남아요** (인용+해석) → **● 개인 감상** → **● 이런 분께 추천해요**',
+    subheadingFormat: '기호+볼드. 예: **● 이런 내용이에요** / **● 마음을 울린 구절** / **● 이런 분께 추천**',
+    toneExamples: '"이 책이 저에게 던진 질문은", "읽는 내내 멈출 수가 없었어요", "오래오래 곱씹게 되는 문장이"',
+    imageHint: '책 표지, 인상 깊은 구절 페이지, 독서 분위기 소품(커피+책)',
+  },
+  car: {
+    name: '자동차',
+    style: '전문적이면서 친근한 존댓말로, 직접 시승한 생생한 경험을 중심으로 쓰세요. 스펙 수치는 볼드로 강조하세요.',
+    structure: '서론(차 첫인상) → **01. 외관 디자인** → **02. 인테리어** → **03. 주행 성능** → **04. 편의기능** → **05. 가격 & 총평** (장단점 정리)',
+    subheadingFormat: '번호+볼드. 예: **01. 외관 디자인** / **02. 인테리어 & 공간** / **03. 주행 느낌**',
+    toneExamples: '"이건 진짜 감동이었습니다", "솔직히 아쉬운 점은", "이전 모델과 비교하면", "이 가격에 이 퀄리티면"',
+    imageHint: '차량 외관(전/측/후면), 인테리어, 계기판, 주행 장면',
+  },
+  pet: {
+    name: '애완동물',
+    style: '따뜻하고 감성적인 문체로, 반려동물에 대한 진심 어린 사랑이 느껴지게 쓰세요. 짧고 감탄스러운 문장을 자주 활용하세요.',
+    structure: '서론(오늘의 에피소드) → 오늘 있었던 일들 자연스럽게 → 반려동물 관찰 포인트 → 독자 공감 유도',
+    subheadingFormat: '감성 볼드. 예: **오늘의 하이라이트** / **이 표정 보세요** / **매일 깜짝 놀라는 이유**',
+    toneExamples: '"얘가 요즘 갑자기...", "눈빛이 말해요", "이게 말이 돼요?", "너무 귀여워서 심장이 멈출 뻔"',
+    imageHint: '반려동물 일상 사진, 귀여운 표정/행동 클로즈업',
+  },
+  sports: {
+    name: '스포츠',
+    style: '열정적이고 주관이 강한 팬의 시선으로, 솔직하고 거침없이 분석하세요.',
+    structure: '서론(핵심 이슈 한 줄 요약) → **⚽ 경기 흐름** → **📊 선수 평가** → **🔍 전술 분석** → **📅 앞으로의 전망**',
+    subheadingFormat: '스포츠 기호+볼드. 예: **⚽ 전반전 분석** / **📊 선수별 평가** / **🔍 감독 전술은?**',
+    toneExamples: '"이건 솔직히 감독 미스입니다", "소름이 돋았어요", "진짜 믿기지 않는 경기였어요"',
+    imageHint: '경기 장면, 선수 사진, 스탯 스크린샷',
+  },
+  other: {
+    name: '정보/기타',
+    style: '유용한 정보를 명확하고 친근하게 전달하는 존댓말로 쓰세요.',
+    structure: '서론(핵심 요약) → 본론(소제목 3~4개) → 결론(요약+행동 유도)',
+    subheadingFormat: '볼드 텍스트. 예: **이것만 알면 돼요** / **핵심 포인트** / **주의할 점**',
+    toneExamples: '"제가 직접 해봤는데요", "이게 정말 효과 있었어요", "많은 분들이 놓치는 부분이"',
+    imageHint: '관련 정보 이미지, 인포그래픽, 관련 제품/장소 사진',
+  },
 };
 
-async function generatePost(keyword, style) {
+const TITLE_FORMULAS = `
+제목 작성 공식 — 아래 5가지 중 키워드와 가장 잘 어울리는 패턴을 선택하세요:
+1. 숫자형: "초보도 따라하는 [키워드] 5가지 방법"
+2. 반전형: "[키워드]인 줄 알았는데 사실은 이랬어요"
+3. 공감형: "저도 몰랐는데 알고 나서 매일 하는 [키워드]"
+4. 의문형: "왜 [키워드]인지 직접 알아봤습니다"
+5. 결과형: "[키워드] 해봤는데 [구체적 결과]였어요"
+제목은 반드시 15~25자 사이, 핵심 키워드가 앞 15자 이내에 포함되어야 합니다.`;
+
+async function generatePost(keyword, style, category = 'other', learningBoost = '') {
   const client = getClient();
-  const styleGuide = STYLE_PROMPTS[style] || STYLE_PROMPTS.informative;
+  const cat = CATEGORIES[category] || CATEGORIES.other;
+
+  const systemPrompt = `당신은 네이버 블로그 전문 작가입니다. 카테고리: ${cat.name}
+
+【절대 규칙 — 위반 시 재작성】
+1. 마크다운 완전 금지: #, ##, ###, **, *, _, >, ~~, \`\`\` 절대 사용하지 마세요
+2. 소제목 형식: ${cat.subheadingFormat}
+3. 볼드 표시: 중요 키워드·수치·소제목은 **텍스트** 형식으로만 표시
+4. 문체: ${cat.style}
+5. 구조: ${cat.structure}
+6. 어조 예시: ${cat.toneExamples}
+
+【SEO 규칙】
+- 첫 단락 100자 이내에 핵심 키워드 1회 등장
+- 본문 전체에 키워드 3~7회 자연스럽게 반복 (동의어·연관어 포함)
+- 소제목에 키워드 또는 연관어 포함
+
+【네이버 홈판 최적화】
+- 문단 당 3~4문장, 문단 간 빈 줄 1회
+- 이미지 삽입 위치마다 [이미지: ${cat.imageHint}] 로 표시 (소제목마다 1개)
+- 마지막 문단: 독자 공감 유도 질문 또는 다음 글 예고로 마무리
+${learningBoost ? `\n【학습 기반 개선 사항】\n${learningBoost}` : ''}
+
+응답 형식 (반드시 아래 형식 그대로):
+TITLE: [제목]
+CONTENT: [본문]
+HASHTAGS: [#태그1 #태그2 #태그3 #태그4 #태그5 #태그6 #태그7 #태그8 #태그9 #태그10]`;
+
+  const userPrompt = `키워드: "${keyword}"
+글 스타일: ${style === 'emotional' ? '감성적, 독자의 공감과 감정 자극' : '정보 전달, 실용적, 독자에게 실질적 도움'}
+
+${TITLE_FORMULAS}
+
+위 키워드로 네이버 블로그 글을 작성해주세요:
+- 제목: 15~25자, 후킹 공식 적용, 클릭을 유도하는 매력적인 제목
+- 본문: 1800~2200자, 소제목 3~4개, 이미지 플레이스홀더 포함
+- 해시태그: 핵심 키워드 + 연관 키워드 10개`;
 
   const response = await client.chat.completions.create({
     model: 'gpt-4.1-mini',
     messages: [
-      {
-        role: 'system',
-        content: `당신은 네이버 블로그 전문 작가입니다. ${styleGuide}
-네이버 블로그에 최적화된 글을 작성하며, 검색 노출과 독자 만족도를 동시에 고려합니다.
-반드시 아래 형식으로만 응답하세요:
-TITLE: [제목]
-CONTENT: [본문]`
-      },
-      {
-        role: 'user',
-        content: `키워드: "${keyword}"
-위 키워드로 네이버 블로그 글을 작성해주세요.
-- 제목: 클릭을 유도하는 매력적인 제목 (30자 이내)
-- 본문: 1500~2000자, 소제목 포함, 자연스러운 키워드 활용`
-      }
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
     ],
-    temperature: 0.8,
+    temperature: 0.85,
+    max_tokens: 3000,
   });
 
   const text = response.choices[0].message.content;
   const titleMatch = text.match(/TITLE:\s*(.+)/);
-  const contentMatch = text.match(/CONTENT:\s*([\s\S]+)/);
+  const contentMatch = text.match(/CONTENT:\s*([\s\S]+?)(?=\nHASHTAGS:|$)/);
+  const hashtagsMatch = text.match(/HASHTAGS:\s*(.+)/);
 
   return {
     title: titleMatch ? titleMatch[1].trim() : keyword,
     content: contentMatch ? contentMatch[1].trim() : text,
+    hashtags: hashtagsMatch ? hashtagsMatch[1].trim() : '',
   };
 }
 
-module.exports = { generatePost };
+module.exports = { generatePost, CATEGORIES };

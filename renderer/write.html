@@ -22,6 +22,28 @@
     .style-btn.selected { border-color: var(--accent); color: var(--accent); background: rgba(59,130,246,0.1); }
     #statusMsg { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; min-height: 22px; }
     .title-input { font-size: 16px; font-weight: 600; }
+    select.form-select {
+      width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--surface); color: var(--text);
+      font-size: 13px; cursor: pointer;
+    }
+    select.form-select:focus { border-color: var(--accent); outline: none; }
+    .seo-bar { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+    .seo-score {
+      display: none; padding: 2px 10px; border-radius: 12px;
+      font-size: 12px; font-weight: 700;
+    }
+    .seo-score.good { display: inline; background: rgba(34,197,94,0.2); color: #22c55e; }
+    .seo-score.medium { display: inline; background: rgba(251,191,36,0.2); color: #f59e0b; }
+    .seo-score.low { display: inline; background: rgba(239,68,68,0.2); color: #ef4444; }
+    .hashtag-area {
+      display: none; padding: 10px 12px; background: rgba(59,130,246,0.08);
+      border: 1px solid rgba(59,130,246,0.2); border-radius: 8px;
+      font-size: 12px; color: var(--muted); line-height: 1.8;
+    }
+    .hashtag-area.visible { display: block; }
+    .url-input-row { display: flex; gap: 8px; margin-top: 8px; }
+    .url-input-row input { flex: 1; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -42,12 +64,27 @@
         <div class="card">
           <div class="card-title"><span class="step-badge">1</span> 키워드 입력</div>
           <div class="form-group">
-            <input type="text" id="keywordInput" placeholder="예: 자기계발, 재테크 입문..." />
+            <input type="text" id="keywordInput" placeholder="예: 자기계발, 재테크 입문, 제주 여행..." />
           </div>
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">2</span> 글 스타일</div>
+          <div class="card-title"><span class="step-badge">2</span> 카테고리 선택</div>
+          <select class="form-select" id="categorySelect">
+            <option value="daily">일상/라이프</option>
+            <option value="recipe">요리/레시피</option>
+            <option value="restaurant">맛집</option>
+            <option value="economy">경제/정보</option>
+            <option value="book">책/문학</option>
+            <option value="car">자동차</option>
+            <option value="pet">애완동물</option>
+            <option value="sports">스포츠</option>
+            <option value="other">기타/정보</option>
+          </select>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="step-badge">3</span> 글 스타일</div>
           <div class="style-select">
             <button class="style-btn selected" data-style="emotional" onclick="selectStyle(this)">😊 감성체</button>
             <button class="style-btn" data-style="informative" onclick="selectStyle(this)">📊 정보전달체</button>
@@ -55,14 +92,14 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">3</span> 글 생성</div>
+          <div class="card-title"><span class="step-badge">4</span> 글 생성</div>
           <button class="btn btn-primary" style="width:100%; justify-content:center;" id="generateBtn" onclick="handleGenerate()">
             ✨ AI 글 생성
           </button>
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">4</span> AI 감지 우회</div>
+          <div class="card-title"><span class="step-badge">5</span> AI 감지 우회</div>
           <button class="btn btn-outline" style="width:100%; justify-content:center;" id="humanizeBtn" onclick="handleHumanize()" disabled>
             🔄 자연스럽게 다듬기
           </button>
@@ -70,20 +107,28 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">5</span> 네이버 발행</div>
+          <div class="card-title"><span class="step-badge">6</span> 네이버 발행</div>
           <button class="btn btn-success" style="width:100%; justify-content:center;" id="publishBtn" onclick="handlePublish()" disabled>
             🚀 네이버에 올리기
           </button>
-          <p style="font-size:12px; color:var(--muted); margin-top:8px;">클릭하면 네이버 에디터가 열리고 글이 자동 입력됩니다</p>
+          <p style="font-size:12px; color:var(--muted); margin-top:8px;">클릭하면 네이버 에디터가 열리고 글+해시태그가 자동 입력됩니다</p>
+          <div class="url-input-row" id="urlInputRow" style="display:none;">
+            <input type="text" id="naverUrlInput" placeholder="발행 후 URL 입력 (예: https://blog.naver.com/...)" />
+            <button class="btn btn-outline btn-sm" onclick="handleSaveUrl()">저장</button>
+          </div>
         </div>
       </div>
 
       <!-- RIGHT: Content -->
       <div class="panel-right">
-        <div id="statusMsg"></div>
+        <div class="seo-bar">
+          <div id="statusMsg"></div>
+          <span id="seoScore" class="seo-score"></span>
+        </div>
         <div class="result-area">
           <input type="text" class="title-input" id="titleInput" placeholder="제목이 여기에 생성됩니다..." />
-          <textarea id="contentInput" placeholder="본문이 여기에 생성됩니다...&#10;&#10;키워드를 입력하고 'AI 글 생성'을 클릭해보세요."></textarea>
+          <textarea id="contentInput" placeholder="본문이 여기에 생성됩니다...&#10;&#10;키워드와 카테고리를 선택하고 'AI 글 생성'을 클릭해보세요."></textarea>
+          <div class="hashtag-area" id="hashtagArea"></div>
         </div>
         <div class="action-bar">
           <button class="btn btn-outline btn-sm" onclick="handleSaveDraft()">💾 초안 저장</button>

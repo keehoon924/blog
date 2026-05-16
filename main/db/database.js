@@ -22,6 +22,21 @@ async function initDB() {
 
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf-8');
   db.run(schema);
+
+  // Migrate existing posts table if needed (add new columns)
+  const migrations = [
+    "ALTER TABLE posts ADD COLUMN category TEXT DEFAULT 'other'",
+    "ALTER TABLE posts ADD COLUMN hashtags TEXT",
+    "ALTER TABLE posts ADD COLUMN naver_url TEXT",
+    "ALTER TABLE posts ADD COLUMN views INTEGER DEFAULT 0",
+    "ALTER TABLE posts ADD COLUMN likes INTEGER DEFAULT 0",
+    "ALTER TABLE posts ADD COLUMN performance_score REAL DEFAULT 0",
+    "ALTER TABLE posts ADD COLUMN performance_checked_at DATETIME",
+  ];
+  for (const sql of migrations) {
+    try { db.run(sql); } catch { /* column already exists */ }
+  }
+
   persistDB();
 }
 
@@ -32,11 +47,11 @@ function persistDB() {
   }
 }
 
-function savePost({ keyword, style, imageStyle, title, content, processedContent, status = 'draft', scheduledAt }) {
+function savePost({ keyword, style, category, imageStyle, title, content, processedContent, hashtags, status = 'draft', scheduledAt }) {
   db.run(
-    `INSERT INTO posts (keyword, style, image_style, title, content, processed_content, status, scheduled_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [keyword, style, imageStyle || null, title, content, processedContent || null, status, scheduledAt || null]
+    `INSERT INTO posts (keyword, style, category, image_style, title, content, processed_content, hashtags, status, scheduled_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [keyword, style, category || 'other', imageStyle || null, title, content, processedContent || null, hashtags || null, status, scheduledAt || null]
   );
   persistDB();
   const result = db.exec('SELECT last_insert_rowid() as id');
@@ -51,7 +66,7 @@ function getPosts() {
 }
 
 function getPost(id) {
-  const result = db.exec(`SELECT * FROM posts WHERE id = ${id}`);
+  const result = db.exec(`SELECT * FROM posts WHERE id = ${Number(id)}`);
   if (!result.length) return null;
   const [{ columns, values }] = result;
   return Object.fromEntries(columns.map((col, i) => [col, values[0][i]]));
@@ -63,4 +78,78 @@ function updatePostStatus(id, status) {
   persistDB();
 }
 
-module.exports = { initDB, savePost, getPosts, getPost, updatePostStatus };
+function updatePostNaverUrl(id, naverUrl) {
+  db.run('UPDATE posts SET naver_url = ? WHERE id = ?', [naverUrl, id]);
+  persistDB();
+}
+
+function updatePostPerformance(id, views, likes, score) {
+  db.run(
+    'UPDATE posts SET views = ?, likes = ?, performance_score = ?, performance_checked_at = ? WHERE id = ?',
+    [views, likes, score, new Date().toISOString(), id]
+  );
+  persistDB();
+}
+
+// Posts published 3+ days ago without performance check
+function getPostsToCheck() {
+  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const result = db.exec(
+    `SELECT * FROM posts WHERE status = 'published' AND naver_url IS NOT NULL AND naver_url != ''
+     AND performance_checked_at IS NULL AND published_at < ?`,
+    [threeDaysAgo]
+  );
+  if (!result.length) return [];
+  const [{ columns, values }] = result;
+  return values.map(row => Object.fromEntries(columns.map((col, i) => [col, row[i]])));
+}
+
+// Get recent published posts in same category for "관련 글" section
+function getRelatedPosts(category, excludeId, limit = 3) {
+  const result = db.exec(
+    `SELECT id, title, naver_url FROM posts
+     WHERE status = 'published' AND category = ? AND id != ? AND naver_url IS NOT NULL AND naver_url != ''
+     ORDER BY published_at DESC LIMIT ?`,
+    [category, excludeId || 0, limit]
+  );
+  if (!result.length) return [];
+  const [{ columns, values }] = result;
+  return values.map(row => Object.fromEntries(columns.map((col, i) => [col, row[i]])));
+}
+
+function saveLearningData({ category, keyword, title, titlePattern, style, views, likes, score }) {
+  db.run(
+    `INSERT INTO learning_data (category, keyword, title, title_pattern, style, views, likes, score)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [category, keyword, title, titlePattern, style, views, likes, score]
+  );
+  persistDB();
+}
+
+function getTopPerformingPosts(category, limit = 5) {
+  const result = db.exec(
+    `SELECT * FROM learning_data WHERE category = ? ORDER BY score DESC LIMIT ?`,
+    [category, limit]
+  );
+  if (!result.length) return [];
+  const [{ columns, values }] = result;
+  return values.map(row => Object.fromEntries(columns.map((col, i) => [col, row[i]])));
+}
+
+function getLearningData(category) {
+  const result = db.exec(
+    `SELECT * FROM learning_data WHERE category = ? ORDER BY created_at DESC LIMIT 20`,
+    [category]
+  );
+  if (!result.length) return [];
+  const [{ columns, values }] = result;
+  return values.map(row => Object.fromEntries(columns.map((col, i) => [col, row[i]])));
+}
+
+module.exports = {
+  initDB, persistDB,
+  savePost, getPosts, getPost,
+  updatePostStatus, updatePostNaverUrl, updatePostPerformance,
+  getPostsToCheck, getRelatedPosts,
+  saveLearningData, getTopPerformingPosts, getLearningData,
+};

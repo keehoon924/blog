@@ -6,7 +6,10 @@ contextBridge.exposeInMainWorld('api', {
   humanizePost: (data) => ipcRenderer.invoke('post:humanize', data),
   savePost: (data) => ipcRenderer.invoke('post:save', data),
   publishNow: (data) => ipcRenderer.invoke('post:publish-now', data),
+  updatePostUrl: (data) => ipcRenderer.invoke('post:update-url', data),
   getHistory: () => ipcRenderer.invoke('history:get'),
   saveSettings: (data) => ipcRenderer.invoke('settings:save', data),
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  checkPerformanceNow: () => ipcRenderer.invoke('performance:check-now'),
+  getPendingPerformanceCount: () => ipcRenderer.invoke('performance:pending-count'),
 });
