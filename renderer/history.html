@@ -5,35 +5,79 @@
   <title>발행 이력</title>
   <link rel="stylesheet" href="css/style.css">
   <style>
-    .history-list { display: flex; flex-direction: column; gap: 12px; }
+    /* Stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; }
+    .stat-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .stat-value { font-size: 22px; font-weight: 700; }
+    .stat-value.green { color: #22c55e; }
+    .stat-value.blue { color: var(--accent); }
+    .stat-value.yellow { color: #f59e0b; }
+
+    /* Filter + Search bar */
+    .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-tabs { display: flex; gap: 4px; }
+    .filter-tab {
+      padding: 6px 14px; border-radius: 20px; font-size: 13px; cursor: pointer;
+      border: 1px solid var(--border); background: transparent; color: var(--muted);
+      transition: all 0.15s;
+    }
+    .filter-tab.active { border-color: var(--accent); color: var(--accent); background: rgba(59,130,246,0.1); }
+    .search-input { flex: 1; min-width: 180px; font-size: 13px; padding: 7px 12px; }
+
+    /* List */
+    .history-list { display: flex; flex-direction: column; gap: 10px; }
     .history-item {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 10px; padding: 16px 20px;
-      display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start;
+      border-radius: 10px; padding: 14px 18px;
+      display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
       cursor: pointer; transition: border-color 0.15s;
     }
     .history-item:hover { border-color: var(--accent); }
-    .history-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-    .history-meta { font-size: 12px; color: var(--muted); display: flex; gap: 12px; }
-    .history-right { text-align: right; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+    .history-title { font-size: 14px; font-weight: 600; margin-bottom: 5px; line-height: 1.4; }
+    .history-meta { font-size: 11px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .history-right { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+    .naver-link {
+      font-size: 11px; color: var(--accent); text-decoration: none;
+      padding: 3px 8px; border: 1px solid rgba(59,130,246,0.3); border-radius: 10px;
+    }
+    .naver-link:hover { background: rgba(59,130,246,0.1); }
+    .perf-badge {
+      font-size: 11px; color: var(--muted);
+      display: flex; gap: 6px;
+    }
     .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
     .empty-state p { margin-bottom: 16px; font-size: 15px; }
+
+    /* Category dot */
+    .cat-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 3px; }
 
     /* Modal */
     .modal-overlay {
       display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.7); z-index: 100;
+      background: rgba(0,0,0,0.75); z-index: 100;
       align-items: center; justify-content: center;
     }
     .modal-overlay.open { display: flex; }
     .modal {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 14px; padding: 24px; width: 680px; max-height: 80vh;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 14px; padding: 28px; width: 700px; max-height: 85vh;
       overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
     }
-    .modal-title { font-size: 18px; font-weight: 700; }
-    .modal-content { font-size: 14px; line-height: 1.8; color: var(--muted); white-space: pre-wrap; }
-    .modal-close { align-self: flex-end; }
+    .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .modal-title { font-size: 18px; font-weight: 700; line-height: 1.4; flex: 1; }
+    .modal-section-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .modal-section-value { font-size: 13px; }
+    .modal-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .modal-hashtags { font-size: 12px; color: var(--accent); line-height: 1.8; word-break: break-all; }
+    .modal-content {
+      font-size: 13px; line-height: 1.8; color: var(--muted);
+      white-space: pre-wrap; max-height: 300px; overflow-y: auto;
+      background: var(--surface); border-radius: 8px; padding: 12px;
+    }
+    .modal-url-row { display: flex; gap: 8px; align-items: center; }
+    .modal-url-row input { flex: 1; font-size: 12px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
   </style>
 </head>
 <body>
@@ -48,19 +92,76 @@
   </nav>
 
   <main>
+    <!-- Stats -->
+    <div class="stats-grid" id="statsGrid">
+      <div class="stat-card"><div class="stat-label">전체 글</div><div class="stat-value" id="statTotal">-</div></div>
+      <div class="stat-card"><div class="stat-label">발행완료</div><div class="stat-value green" id="statPublished">-</div></div>
+      <div class="stat-card"><div class="stat-label">초안</div><div class="stat-value blue" id="statDraft">-</div></div>
+      <div class="stat-card"><div class="stat-label">총 조회수</div><div class="stat-value yellow" id="statViews">-</div></div>
+    </div>
+
+    <!-- Filter + Search -->
+    <div class="filter-bar">
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all" onclick="setFilter('all', this)">전체</button>
+        <button class="filter-tab" data-filter="published" onclick="setFilter('published', this)">발행완료</button>
+        <button class="filter-tab" data-filter="draft" onclick="setFilter('draft', this)">초안</button>
+        <button class="filter-tab" data-filter="scheduled" onclick="setFilter('scheduled', this)">예약됨</button>
+        <button class="filter-tab" data-filter="failed" onclick="setFilter('failed', this)">실패</button>
+      </div>
+      <input type="text" class="search-input" id="searchInput" placeholder="제목 또는 소재 검색..." oninput="renderList()" />
+    </div>
+
     <div id="historyList" class="history-list"></div>
   </main>
 
-  <!-- Post detail modal -->
+  <!-- Detail Modal -->
   <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
     <div class="modal">
-      <div class="modal-title" id="modalTitle"></div>
-      <div style="display:flex; gap:10px; align-items:center;">
+      <div class="modal-header">
+        <div class="modal-title" id="modalTitle"></div>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+      </div>
+
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
         <span class="badge" id="modalBadge"></span>
         <span style="font-size:12px; color:var(--muted);" id="modalDate"></span>
+        <span style="font-size:12px; color:var(--muted);" id="modalCategory"></span>
       </div>
-      <div class="modal-content" id="modalContent"></div>
-      <button class="btn btn-outline btn-sm modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">닫기</button>
+
+      <div class="modal-row">
+        <div>
+          <div class="modal-section-label">소재</div>
+          <div class="modal-section-value" id="modalSubject">-</div>
+        </div>
+        <div>
+          <div class="modal-section-label">관점/시각</div>
+          <div class="modal-section-value" id="modalPerspective">-</div>
+        </div>
+      </div>
+
+      <div id="modalHashtagsWrap" style="display:none;">
+        <div class="modal-section-label">해시태그</div>
+        <div class="modal-hashtags" id="modalHashtags"></div>
+      </div>
+
+      <div>
+        <div class="modal-section-label">본문</div>
+        <div class="modal-content" id="modalContent"></div>
+      </div>
+
+      <div>
+        <div class="modal-section-label">네이버 URL</div>
+        <div class="modal-url-row">
+          <input type="text" id="modalUrlInput" placeholder="발행 후 URL을 여기에 붙여넣으세요..." />
+          <button class="btn btn-outline btn-sm" onclick="saveModalUrl()">저장</button>
+          <button class="btn btn-primary btn-sm" id="modalOpenBtn" onclick="openNaverUrl()" style="display:none;">열기 ↗</button>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('modalOverlay').classList.remove('open')">닫기</button>
+      </div>
     </div>
   </div>
 

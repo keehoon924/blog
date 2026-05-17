@@ -15,4 +15,5 @@ contextBridge.exposeInMainWorld('api', {
   generateImage: (data) => ipcRenderer.invoke('image:generate', data),
   openImageFolder: () => ipcRenderer.invoke('image:open-folder'),
   fetchKeywords: (opts) => ipcRenderer.invoke('keywords:fetch', opts || {}),
+  openExternalUrl: (url) => ipcRenderer.invoke('url:open-external', url),
 });

@@ -155,6 +155,13 @@ ipcMain.handle('image:open-folder', () => {
   return { success: true };
 });
 
+ipcMain.handle('url:open-external', (event, url) => {
+  if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+    shell.openExternal(url);
+  }
+  return { success: true };
+});
+
 ipcMain.handle('keywords:fetch', async (event, { forceRefresh = false } = {}) => {
   try {
     const result = await fetchTrendingKeywords(forceRefresh);
