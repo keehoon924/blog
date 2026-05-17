@@ -59,7 +59,10 @@
     </div>
 
     <div class="card keywords-wrap">
-      <div class="keywords-title">🔥 추천 키워드 (DataLab API 연동 전 샘플)</div>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div class="keywords-title" id="keywordsLabel" style="margin-bottom:0;">🔥 트렌딩 키워드</div>
+        <button id="keywordsRefreshBtn" class="btn btn-outline btn-sm" onclick="loadKeywords(true)" style="font-size:11px; padding:4px 10px;">🔄 새로고침</button>
+      </div>
       <div class="keywords-list" id="keywordsList"></div>
     </div>
   </main>

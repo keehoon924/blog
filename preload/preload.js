@@ -14,4 +14,5 @@ contextBridge.exposeInMainWorld('api', {
   getPendingPerformanceCount: () => ipcRenderer.invoke('performance:pending-count'),
   generateImage: (data) => ipcRenderer.invoke('image:generate', data),
   openImageFolder: () => ipcRenderer.invoke('image:open-folder'),
+  fetchKeywords: (opts) => ipcRenderer.invoke('keywords:fetch', opts || {}),
 });
