@@ -108,7 +108,25 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">6</span> AI 감지 우회</div>
+          <div class="card-title"><span class="step-badge">6</span> AI 이미지 생성 <span style="color:var(--muted);font-size:11px;">선택</span></div>
+          <div class="style-select" style="margin-bottom:8px;">
+            <button class="style-btn selected" data-imgstyle="blog" onclick="selectImgStyle(this)">🖼️ 블로그용</button>
+            <button class="style-btn" data-imgstyle="card" onclick="selectImgStyle(this)">📰 카드뉴스</button>
+          </div>
+          <button class="btn btn-outline" style="width:100%; justify-content:center;" id="imgGenBtn" onclick="handleGenerateImage()" disabled>
+            🎨 이미지 생성
+          </button>
+          <div id="imagePreview" style="margin-top:10px; display:none;">
+            <img id="previewImg" style="width:100%; border-radius:8px; border:1px solid var(--border);" />
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <span id="imgFilename" style="font-size:11px; color:var(--muted); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+              <button class="btn btn-outline btn-sm" onclick="api.openImageFolder()" style="flex-shrink:0;">📁 폴더</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="step-badge">7</span> AI 감지 우회</div>
           <button class="btn btn-outline" style="width:100%; justify-content:center;" id="humanizeBtn" onclick="handleHumanize()" disabled>
             🔄 자연스럽게 다듬기
           </button>
@@ -116,7 +134,7 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">7</span> 네이버 발행</div>
+          <div class="card-title"><span class="step-badge">8</span> 네이버 발행</div>
           <button class="btn btn-success" style="width:100%; justify-content:center;" id="publishBtn" onclick="handlePublish()" disabled>
             🚀 네이버에 올리기
           </button>
