@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  keyword TEXT,
+  subject TEXT,
+  perspective TEXT,
   style TEXT,
   category TEXT DEFAULT 'other',
   image_style TEXT,
@@ -28,7 +29,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS learning_data (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   category TEXT,
-  keyword TEXT,
+  subject TEXT,
   title TEXT,
   title_pattern TEXT,
   style TEXT,

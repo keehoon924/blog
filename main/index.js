@@ -49,21 +49,21 @@ ipcMain.handle('navigate', (event, page) => {
   return { success: true };
 });
 
-ipcMain.handle('post:generate', async (event, { keyword, style, category }) => {
+ipcMain.handle('post:generate', async (event, { subject, perspective, style, category }) => {
   try {
     const learningBoost = getLearningBoost(category || 'other');
-    const { lsi, longtail } = await analyzeKeyword(keyword);
+    const { lsi, longtail } = await analyzeKeyword(subject);
     const relatedKeywords = [...longtail, ...lsi].slice(0, 6);
-    const result = await generatePost(keyword, style, category || 'other', learningBoost, relatedKeywords);
+    const result = await generatePost(subject, perspective || '', style, category || 'other', learningBoost, relatedKeywords);
     return { success: true, data: result, relatedKeywords };
   } catch (err) {
     return { success: false, error: err.message };
   }
 });
 
-ipcMain.handle('post:humanize', async (event, { title, content, keyword }) => {
+ipcMain.handle('post:humanize', async (event, { title, content, subject }) => {
   try {
-    const result = await humanizePost(title, content, keyword || '');
+    const result = await humanizePost(title, content, subject || '');
     return { success: true, data: result };
   } catch (err) {
     return { success: false, error: err.message };
@@ -84,7 +84,7 @@ ipcMain.handle('post:publish-now', async (event, { postId, title, content, hasht
     const config = loadConfig();
     const { getRelatedPosts } = require('./db/database');
     const relatedPosts = postId ? getRelatedPosts(category || 'other', postId) : [];
-    await publishToNaver({ title, content, hashtags, relatedPosts, config });
+    await publishToNaver({ title, content, hashtags, relatedPosts, config, category });
     if (postId) updatePostStatus(postId, 'published');
     return { success: true };
   } catch (err) {

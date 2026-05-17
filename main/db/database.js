@@ -13,29 +13,13 @@ async function initDB() {
 
   dbPath = path.join(app.getPath('userData'), 'blog-auto.db');
 
-  if (fs.existsSync(dbPath)) {
-    const buffer = fs.readFileSync(dbPath);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
+  // 새 스키마(v2: subject/perspective)로 완전 재생성 — 기존 데이터 폐기
+  db = new SQL.Database();
+  db.run('DROP TABLE IF EXISTS posts');
+  db.run('DROP TABLE IF EXISTS learning_data');
 
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf-8');
   db.run(schema);
-
-  // Migrate existing posts table if needed (add new columns)
-  const migrations = [
-    "ALTER TABLE posts ADD COLUMN category TEXT DEFAULT 'other'",
-    "ALTER TABLE posts ADD COLUMN hashtags TEXT",
-    "ALTER TABLE posts ADD COLUMN naver_url TEXT",
-    "ALTER TABLE posts ADD COLUMN views INTEGER DEFAULT 0",
-    "ALTER TABLE posts ADD COLUMN likes INTEGER DEFAULT 0",
-    "ALTER TABLE posts ADD COLUMN performance_score REAL DEFAULT 0",
-    "ALTER TABLE posts ADD COLUMN performance_checked_at DATETIME",
-  ];
-  for (const sql of migrations) {
-    try { db.run(sql); } catch { /* column already exists */ }
-  }
 
   persistDB();
 }
@@ -47,11 +31,11 @@ function persistDB() {
   }
 }
 
-function savePost({ keyword, style, category, imageStyle, title, content, processedContent, hashtags, status = 'draft', scheduledAt }) {
+function savePost({ subject, perspective, style, category, imageStyle, title, content, processedContent, hashtags, status = 'draft', scheduledAt }) {
   db.run(
-    `INSERT INTO posts (keyword, style, category, image_style, title, content, processed_content, hashtags, status, scheduled_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [keyword, style, category || 'other', imageStyle || null, title, content, processedContent || null, hashtags || null, status, scheduledAt || null]
+    `INSERT INTO posts (subject, perspective, style, category, image_style, title, content, processed_content, hashtags, status, scheduled_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [subject || '', perspective || null, style, category || 'other', imageStyle || null, title, content, processedContent || null, hashtags || null, status, scheduledAt || null]
   );
   persistDB();
   const result = db.exec('SELECT last_insert_rowid() as id');
@@ -117,11 +101,11 @@ function getRelatedPosts(category, excludeId, limit = 3) {
   return values.map(row => Object.fromEntries(columns.map((col, i) => [col, row[i]])));
 }
 
-function saveLearningData({ category, keyword, title, titlePattern, style, views, likes, score }) {
+function saveLearningData({ category, subject, title, titlePattern, style, views, likes, score }) {
   db.run(
-    `INSERT INTO learning_data (category, keyword, title, title_pattern, style, views, likes, score)
+    `INSERT INTO learning_data (category, subject, title, title_pattern, style, views, likes, score)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [category, keyword, title, titlePattern, style, views, likes, score]
+    [category, subject || '', title, titlePattern, style, views, likes, score]
   );
   persistDB();
 }

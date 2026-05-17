@@ -62,15 +62,8 @@
       <!-- LEFT: Controls -->
       <div class="panel-left">
         <div class="card">
-          <div class="card-title"><span class="step-badge">1</span> 키워드 입력</div>
-          <div class="form-group">
-            <input type="text" id="keywordInput" placeholder="예: 자기계발, 재테크 입문, 제주 여행..." />
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title"><span class="step-badge">2</span> 카테고리 선택</div>
-          <select class="form-select" id="categorySelect">
+          <div class="card-title"><span class="step-badge">1</span> 카테고리 선택</div>
+          <select class="form-select" id="categorySelect" onchange="onCategoryChange()">
             <option value="daily">일상/라이프</option>
             <option value="recipe">요리/레시피</option>
             <option value="restaurant">맛집</option>
@@ -84,7 +77,23 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">3</span> 글 스타일</div>
+          <div class="card-title"><span class="step-badge">2</span> 소재 입력 <span style="color:var(--accent);font-size:11px;">필수</span></div>
+          <div class="form-group">
+            <input type="text" id="subjectInput" placeholder="책 제목, 가게명, 요리명 등 구체적으로..." />
+            <p id="subjectHint" style="font-size:11px; color:var(--muted); margin-top:6px;"></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="step-badge">3</span> 관점/시각 <span style="color:var(--muted);font-size:11px;">선택 (비우면 AI가 결정)</span></div>
+          <div class="form-group">
+            <input type="text" id="perspectiveInput" placeholder="추천 대상, 목적, 강조할 내용..." />
+            <p id="perspectiveHint" style="font-size:11px; color:var(--muted); margin-top:6px;"></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="step-badge">4</span> 글 스타일</div>
           <div class="style-select">
             <button class="style-btn selected" data-style="emotional" onclick="selectStyle(this)">😊 감성체</button>
             <button class="style-btn" data-style="informative" onclick="selectStyle(this)">📊 정보전달체</button>
@@ -92,14 +101,14 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">4</span> 글 생성</div>
+          <div class="card-title"><span class="step-badge">5</span> 글 생성</div>
           <button class="btn btn-primary" style="width:100%; justify-content:center;" id="generateBtn" onclick="handleGenerate()">
             ✨ AI 글 생성
           </button>
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">5</span> AI 감지 우회</div>
+          <div class="card-title"><span class="step-badge">6</span> AI 감지 우회</div>
           <button class="btn btn-outline" style="width:100%; justify-content:center;" id="humanizeBtn" onclick="handleHumanize()" disabled>
             🔄 자연스럽게 다듬기
           </button>
@@ -107,7 +116,7 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">6</span> 네이버 발행</div>
+          <div class="card-title"><span class="step-badge">7</span> 네이버 발행</div>
           <button class="btn btn-success" style="width:100%; justify-content:center;" id="publishBtn" onclick="handlePublish()" disabled>
             🚀 네이버에 올리기
           </button>
