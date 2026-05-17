@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-require('dotenv').config();
+require('dotenv').config(); // dev용 — 패키징 후엔 config.json에서 로드
 
 const { initDB, savePost, getPosts, getPost, updatePostStatus, updatePostNaverUrl, getPostsToCheck } = require('./db/database');
 const { generatePost } = require('./ai/writer');
@@ -15,6 +15,16 @@ const { fetchTrendingKeywords } = require('./keywords/trending');
 const { shell } = require('electron');
 
 let mainWindow;
+
+// 설정 파일의 API 키를 process.env로 동기화 (패키징 후 .env 없을 때 필요)
+function syncEnvFromConfig() {
+  const config = loadConfig();
+  if (config.openaiKey)           process.env.OPENAI_API_KEY              = config.openaiKey;
+  if (config.datalabClientId)     process.env.NAVER_DATALAB_CLIENT_ID     = config.datalabClientId;
+  if (config.datalabClientSecret) process.env.NAVER_DATALAB_CLIENT_SECRET = config.datalabClientSecret;
+  if (config.naverID)             process.env.NAVER_ID                    = config.naverID;
+  if (config.naverPW)             process.env.NAVER_PW                    = config.naverPW;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -36,6 +46,7 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   await initDB();
+  syncEnvFromConfig();
   createWindow();
   startScheduler();
   app.on('activate', () => {
@@ -116,9 +127,9 @@ ipcMain.handle('history:get', () => {
 ipcMain.handle('settings:save', (event, settings) => {
   try {
     saveConfig(settings);
-    // 발행 시간·카테고리가 바뀌면 자동모드 재시작
-    const { autoMode } = require('./config').loadConfig();
-    if (autoMode) startAutoPublish();
+    syncEnvFromConfig(); // API 키 즉시 반영
+    const config = loadConfig();
+    if (config.autoMode) startAutoPublish();
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -180,7 +191,7 @@ ipcMain.handle('image:generate', async (event, { subject, category, style }) => 
 });
 
 ipcMain.handle('image:open-folder', () => {
-  const dir = path.join(process.cwd(), 'assets', 'generated');
+  const dir = path.join(app.getPath('userData'), 'generated-images');
   shell.openPath(dir);
   return { success: true };
 });

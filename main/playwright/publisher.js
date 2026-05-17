@@ -1,8 +1,9 @@
 const { chromium } = require('playwright');
+const { app } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-const SESSION_FILE = path.join(process.cwd(), 'naver-session.json');
+const SESSION_FILE = path.join(app.getPath('userData'), 'naver-session.json');
 
 // Bold 마커 파싱: [{text, bold}]
 function parseSegments(text) {
@@ -246,10 +247,12 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
 
   if (!naverID || !naverPW) throw new Error('네이버 아이디/비밀번호가 설정되지 않았습니다.');
 
+  // channel: 'chrome' uses the user's installed Chrome — no separate browser download needed
   const browser = await chromium.launch({
     headless: false,
     slowMo: 20,
-    args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+    channel: 'chrome',
+    args: ['--disable-blink-features=AutomationControlled'],
   });
 
   const contextOptions = {
