@@ -10,6 +10,8 @@ const { analyzeKeyword } = require('./keywords/analyzer');
 const { publishToNaver } = require('./playwright/publisher');
 const { loadConfig, saveConfig } = require('./config');
 const { startScheduler, runPerformanceCheck } = require('./scheduler');
+const { generateImage } = require('./ai/imageGen');
+const { shell } = require('electron');
 
 let mainWindow;
 
@@ -135,6 +137,21 @@ ipcMain.handle('performance:check-now', async () => {
   } catch (err) {
     return { success: false, error: err.message };
   }
+});
+
+ipcMain.handle('image:generate', async (event, { subject, category, style }) => {
+  try {
+    const result = await generateImage(subject, category || 'other', style || 'blog');
+    return { success: true, data: result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('image:open-folder', () => {
+  const dir = path.join(process.cwd(), 'assets', 'generated');
+  shell.openPath(dir);
+  return { success: true };
 });
 
 ipcMain.handle('performance:pending-count', () => {

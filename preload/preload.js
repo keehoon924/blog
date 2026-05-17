@@ -12,4 +12,6 @@ contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   checkPerformanceNow: () => ipcRenderer.invoke('performance:check-now'),
   getPendingPerformanceCount: () => ipcRenderer.invoke('performance:pending-count'),
+  generateImage: (data) => ipcRenderer.invoke('image:generate', data),
+  openImageFolder: () => ipcRenderer.invoke('image:open-folder'),
 });

@@ -1,6 +1,8 @@
 let selectedStyle = 'emotional';
+let selectedImgStyle = 'blog';
 let currentPostId = null;
 let currentHashtags = '';
+let currentImagePath = null;
 
 // 카테고리별 소재 입력 힌트
 const SUBJECT_HINTS = {
@@ -51,9 +53,15 @@ function onCategoryChange() {
 }
 
 function selectStyle(btn) {
-  document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('selected'));
+  document.querySelectorAll('.style-btn:not([data-imgstyle])').forEach(b => b.classList.remove('selected'));
   btn.classList.add('selected');
   selectedStyle = btn.dataset.style;
+}
+
+function selectImgStyle(btn) {
+  document.querySelectorAll('[data-imgstyle]').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedImgStyle = btn.dataset.imgstyle;
 }
 
 function setStatus(msg, loading = false) {
@@ -154,10 +162,40 @@ async function handleGenerate() {
 
   document.getElementById('humanizeBtn').disabled = false;
   document.getElementById('publishBtn').disabled = false;
+  document.getElementById('imgGenBtn').disabled = false;
 
   updateSeoScore();
   setStatus('✅ 글 생성 완료. 검토 후 다듬기 또는 발행하세요.');
   showToast('글 생성 완료!', 'success');
+}
+
+async function handleGenerateImage() {
+  const subject = document.getElementById('subjectInput').value.trim();
+  const category = document.getElementById('categorySelect').value;
+  if (!subject) { showToast('소재를 먼저 입력해주세요.', 'error'); return; }
+
+  setStatus('AI 이미지 생성 중... (약 10~20초)', true);
+  document.getElementById('imgGenBtn').disabled = true;
+
+  const res = await api.generateImage({ subject, category, style: selectedImgStyle });
+
+  document.getElementById('imgGenBtn').disabled = false;
+
+  if (!res.success) {
+    setStatus('');
+    showToast(res.error || '이미지 생성 실패', 'error');
+    return;
+  }
+
+  currentImagePath = res.data.filepath;
+
+  const preview = document.getElementById('imagePreview');
+  document.getElementById('previewImg').src = res.data.dataUrl;
+  document.getElementById('imgFilename').textContent = res.data.filename;
+  preview.style.display = 'block';
+
+  setStatus('✅ 이미지 생성 완료. 네이버 에디터에서 직접 업로드하세요.');
+  showToast('이미지 생성 완료!', 'success');
 }
 
 async function handleHumanize() {
@@ -285,8 +323,12 @@ function clearContent() {
   document.getElementById('urlInputRow').style.display = 'none';
   document.getElementById('humanizeBtn').disabled = true;
   document.getElementById('publishBtn').disabled = true;
+  document.getElementById('imgGenBtn').disabled = true;
+  document.getElementById('imagePreview').style.display = 'none';
+  document.getElementById('previewImg').src = '';
   currentHashtags = '';
   currentPostId = null;
+  currentImagePath = null;
   setStatus('');
 }
 
