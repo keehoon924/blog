@@ -66,21 +66,76 @@
         </div>
       </div>
 
-      <!-- 발행 시간 -->
+      <!-- 발행 시간 + 카테고리 -->
       <div class="card">
-        <div class="section-title">⏰ 기본 발행 시간</div>
-        <div class="grid-3">
-          <div class="form-group">
-            <label>🌅 아침</label>
-            <input type="text" id="morningTime" placeholder="09:00" />
+        <div class="section-title">⏰ 완전자동 발행 시간 &amp; 카테고리</div>
+        <p style="font-size:12px; color:var(--muted); margin-bottom:16px;">각 슬롯의 발행 시간과 카테고리를 설정하세요. 완전자동 모드를 켜면 매일 자동 발행됩니다.</p>
+
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:16px;">
+          <div>
+            <div style="font-size:12px; font-weight:700; margin-bottom:10px;">🌅 아침 슬롯</div>
+            <div class="form-group">
+              <label>발행 시간</label>
+              <input type="text" id="morningTime" placeholder="09:00" />
+            </div>
+            <div class="form-group">
+              <label>카테고리</label>
+              <select class="form-select" id="morningCategory">
+                <option value="daily">일상/라이프</option>
+                <option value="recipe">요리/레시피</option>
+                <option value="restaurant">맛집</option>
+                <option value="economy">경제/정보</option>
+                <option value="book">책/문학</option>
+                <option value="car">자동차</option>
+                <option value="pet">애완동물</option>
+                <option value="sports">스포츠</option>
+                <option value="other">기타/정보</option>
+              </select>
+            </div>
           </div>
-          <div class="form-group">
-            <label>☀️ 점심</label>
-            <input type="text" id="lunchTime" placeholder="12:00" />
+
+          <div>
+            <div style="font-size:12px; font-weight:700; margin-bottom:10px;">☀️ 점심 슬롯</div>
+            <div class="form-group">
+              <label>발행 시간</label>
+              <input type="text" id="lunchTime" placeholder="12:00" />
+            </div>
+            <div class="form-group">
+              <label>카테고리</label>
+              <select class="form-select" id="lunchCategory">
+                <option value="daily">일상/라이프</option>
+                <option value="recipe">요리/레시피</option>
+                <option value="restaurant">맛집</option>
+                <option value="economy">경제/정보</option>
+                <option value="book">책/문학</option>
+                <option value="car">자동차</option>
+                <option value="pet">애완동물</option>
+                <option value="sports">스포츠</option>
+                <option value="other">기타/정보</option>
+              </select>
+            </div>
           </div>
-          <div class="form-group">
-            <label>🌆 저녁</label>
-            <input type="text" id="eveningTime" placeholder="18:00" />
+
+          <div>
+            <div style="font-size:12px; font-weight:700; margin-bottom:10px;">🌆 저녁 슬롯</div>
+            <div class="form-group">
+              <label>발행 시간</label>
+              <input type="text" id="eveningTime" placeholder="18:00" />
+            </div>
+            <div class="form-group">
+              <label>카테고리</label>
+              <select class="form-select" id="eveningCategory">
+                <option value="daily">일상/라이프</option>
+                <option value="recipe">요리/레시피</option>
+                <option value="restaurant">맛집</option>
+                <option value="economy">경제/정보</option>
+                <option value="book">책/문학</option>
+                <option value="car">자동차</option>
+                <option value="pet">애완동물</option>
+                <option value="sports">스포츠</option>
+                <option value="other">기타/정보</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
