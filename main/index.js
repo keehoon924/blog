@@ -9,7 +9,7 @@ const { getLearningBoost } = require('./ai/learner');
 const { analyzeKeyword } = require('./keywords/analyzer');
 const { publishToNaver } = require('./playwright/publisher');
 const { loadConfig, saveConfig } = require('./config');
-const { startScheduler, runPerformanceCheck } = require('./scheduler');
+const { startScheduler, startAutoPublish, stopAutoPublish, runAutoPublish, runPerformanceCheck, getSchedulerStatus } = require('./scheduler');
 const { generateImage } = require('./ai/imageGen');
 const { fetchTrendingKeywords } = require('./keywords/trending');
 const { shell } = require('electron');
@@ -116,6 +116,9 @@ ipcMain.handle('history:get', () => {
 ipcMain.handle('settings:save', (event, settings) => {
   try {
     saveConfig(settings);
+    // 발행 시간·카테고리가 바뀌면 자동모드 재시작
+    const { autoMode } = require('./config').loadConfig();
+    if (autoMode) startAutoPublish();
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -126,6 +129,33 @@ ipcMain.handle('settings:get', () => {
   try {
     const config = loadConfig();
     return { success: true, data: config };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('scheduler:get-status', () => {
+  try {
+    return { success: true, data: getSchedulerStatus() };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('scheduler:set-auto-mode', (event, enabled) => {
+  try {
+    saveConfig({ autoMode: enabled });
+    if (enabled) startAutoPublish(); else stopAutoPublish();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('scheduler:run-now', async (event, { category, style }) => {
+  try {
+    await runAutoPublish(category || 'daily', style || 'emotional');
+    return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
   }

@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   openImageFolder: () => ipcRenderer.invoke('image:open-folder'),
   fetchKeywords: (opts) => ipcRenderer.invoke('keywords:fetch', opts || {}),
   openExternalUrl: (url) => ipcRenderer.invoke('url:open-external', url),
+  getSchedulerStatus: () => ipcRenderer.invoke('scheduler:get-status'),
+  setAutoMode: (enabled) => ipcRenderer.invoke('scheduler:set-auto-mode', enabled),
+  runNow: (data) => ipcRenderer.invoke('scheduler:run-now', data),
 });

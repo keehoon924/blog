@@ -93,5 +93,67 @@ function statusLabel(status) {
   return map[status] || status;
 }
 
+// ─── 완전자동 모드 ────────────────────────────────────────────────────────────
+
+const CAT_LABELS = {
+  daily: '일상', recipe: '요리', restaurant: '맛집',
+  economy: '경제', book: '책', car: '자동차',
+  pet: '반려동물', sports: '스포츠', other: '기타',
+};
+
+function nextOccurrence(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(h, m, 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1);
+  const diff = target - now;
+  const hours = Math.floor(diff / 3600000);
+  const mins  = Math.floor((diff % 3600000) / 60000);
+  const isToday = target.getDate() === now.getDate();
+  return isToday ? `오늘 ${timeStr} (${hours}시간 ${mins}분 후)` : `내일 ${timeStr}`;
+}
+
+function applyAutoModeUI(status) {
+  const card    = document.getElementById('autoCard');
+  const btn     = document.getElementById('autoToggleBtn');
+  const enabled = status.autoMode;
+
+  btn.textContent = enabled ? 'ON' : 'OFF';
+  btn.className   = `auto-toggle ${enabled ? 'on' : 'off'}`;
+  card.className  = `auto-card${enabled ? ' active' : ''}`;
+
+  const slots = [
+    { catEl: 'slotMorning', nextEl: 'slotMorningNext', time: status.morningTime, cat: status.morningCategory },
+    { catEl: 'slotLunch',   nextEl: 'slotLunchNext',   time: status.lunchTime,   cat: status.lunchCategory   },
+    { catEl: 'slotEvening', nextEl: 'slotEveningNext', time: status.eveningTime, cat: status.eveningCategory  },
+  ];
+  for (const s of slots) {
+    document.getElementById(s.catEl).textContent  = `${s.time} · ${CAT_LABELS[s.cat] || s.cat}`;
+    document.getElementById(s.nextEl).textContent = enabled ? nextOccurrence(s.time) : '예약 없음';
+  }
+}
+
+async function loadAutoModeStatus() {
+  const res = await api.getSchedulerStatus();
+  if (res.success) applyAutoModeUI(res.data);
+}
+
+async function toggleAutoMode() {
+  const btn     = document.getElementById('autoToggleBtn');
+  const enabled = btn.textContent === 'OFF'; // flip
+  const res     = await api.setAutoMode(enabled);
+  if (res.success) {
+    const statusRes = await api.getSchedulerStatus();
+    if (statusRes.success) applyAutoModeUI(statusRes.data);
+    showToast(enabled ? '완전자동 모드가 켜졌습니다.' : '완전자동 모드가 꺼졌습니다.', 'success');
+  } else {
+    showToast(res.error || '설정 실패', 'error');
+  }
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
 loadTodayPosts();
 loadKeywords();
+loadAutoModeStatus();

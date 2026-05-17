@@ -29,6 +29,9 @@ async function loadSettings() {
   if (d.morningTime) document.getElementById('morningTime').value = d.morningTime;
   if (d.lunchTime) document.getElementById('lunchTime').value = d.lunchTime;
   if (d.eveningTime) document.getElementById('eveningTime').value = d.eveningTime;
+  if (d.morningCategory) document.getElementById('morningCategory').value = d.morningCategory;
+  if (d.lunchCategory) document.getElementById('lunchCategory').value = d.lunchCategory;
+  if (d.eveningCategory) document.getElementById('eveningCategory').value = d.eveningCategory;
 }
 
 async function handleSave() {
@@ -41,6 +44,9 @@ async function handleSave() {
     morningTime: document.getElementById('morningTime').value.trim() || '09:00',
     lunchTime: document.getElementById('lunchTime').value.trim() || '12:00',
     eveningTime: document.getElementById('eveningTime').value.trim() || '18:00',
+    morningCategory: document.getElementById('morningCategory').value,
+    lunchCategory: document.getElementById('lunchCategory').value,
+    eveningCategory: document.getElementById('eveningCategory').value,
   };
 
   if (!settings.naverID || !settings.naverPW) {

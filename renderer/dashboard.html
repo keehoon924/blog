@@ -23,6 +23,23 @@
     }
     .keyword-chip:hover { background: rgba(59,130,246,0.25); }
     .section-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+
+    /* Auto mode */
+    .auto-card { border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; background: var(--surface); margin-bottom: 24px; }
+    .auto-card.active { border-color: #22c55e; background: rgba(34,197,94,0.05); }
+    .auto-toggle {
+      padding: 6px 18px; border-radius: 20px; font-size: 13px; font-weight: 700;
+      cursor: pointer; border: none; transition: all 0.2s;
+    }
+    .auto-toggle.on  { background: #22c55e; color: #fff; }
+    .auto-toggle.off { background: var(--border); color: var(--muted); }
+    .slot-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .slot-info {
+      flex: 1; min-width: 140px; padding: 10px 14px; border-radius: 8px;
+      background: var(--bg); border: 1px solid var(--border); font-size: 12px;
+    }
+    .slot-info .slot-time-lbl { font-weight: 700; font-size: 13px; margin-bottom: 3px; }
+    .slot-info .slot-next { color: var(--muted); margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -39,7 +56,23 @@
   <main>
     <div class="mode-btns">
       <button class="btn btn-primary" onclick="api.navigate('write')">⚡ 반자동 모드</button>
-      <button class="btn btn-outline" onclick="alert('완전자동 모드는 2단계에서 추가됩니다.')">🤖 완전자동 모드</button>
+      <button class="btn btn-outline" onclick="api.navigate('settings')">⚙️ 발행 시간 설정</button>
+    </div>
+
+    <!-- 완전자동 모드 카드 -->
+    <div class="auto-card" id="autoCard">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div>
+          <div style="font-size:15px; font-weight:700;">🤖 완전자동 모드</div>
+          <div style="font-size:12px; color:var(--muted); margin-top:3px;">설정 시간에 자동으로 글을 생성하고 네이버에 발행합니다</div>
+        </div>
+        <button class="auto-toggle off" id="autoToggleBtn" onclick="toggleAutoMode()">OFF</button>
+      </div>
+      <div class="slot-row" id="slotRow">
+        <div class="slot-info"><div class="slot-time-lbl">🌅 아침</div><div id="slotMorning">-</div><div class="slot-next" id="slotMorningNext"></div></div>
+        <div class="slot-info"><div class="slot-time-lbl">☀️ 점심</div><div id="slotLunch">-</div><div class="slot-next" id="slotLunchNext"></div></div>
+        <div class="slot-info"><div class="slot-time-lbl">🌆 저녁</div><div id="slotEvening">-</div><div class="slot-next" id="slotEveningNext"></div></div>
+      </div>
     </div>
 
     <p class="section-title">오늘의 발행 현황</p>
