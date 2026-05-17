@@ -77,38 +77,30 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">2</span> 소재 입력 <span style="color:var(--accent);font-size:11px;">필수</span></div>
+          <div class="card-title"><span class="step-badge">2</span> 핵심 검색어 / 장소명 <span style="color:var(--accent);font-size:11px;">필수</span></div>
           <div class="form-group">
-            <input type="text" id="subjectInput" placeholder="책 제목, 가게명, 요리명 등 구체적으로..." />
-            <p id="subjectHint" style="font-size:11px; color:var(--muted); margin-top:6px;"></p>
+            <input type="text" id="keywordInput" placeholder="키워드 또는 가게·장소명 입력" />
+            <p style="font-size:11px; color:var(--muted); margin-top:6px;" id="keywordHint">예: 성수동 맛집 / 현대 아이오닉5 / 청년 전세 대출</p>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">3</span> 관점/시각 <span style="color:var(--muted);font-size:11px;">선택 (비우면 AI가 결정)</span></div>
+          <div class="card-title"><span class="step-badge">3</span> 원하는 글 내용 <span style="color:var(--muted);font-size:11px;">선택 (비우면 AI 자동 결정)</span></div>
           <div class="form-group">
-            <input type="text" id="perspectiveInput" placeholder="추천 대상, 목적, 강조할 내용..." />
-            <p id="perspectiveHint" style="font-size:11px; color:var(--muted); margin-top:6px;"></p>
+            <textarea id="promptInput" rows="5" style="font-size:12px; line-height:1.6; resize:vertical;" placeholder="예: 2025년 청년 전세 대출 조건 바뀐 내용으로, 30대 직장인 입장에서 지금 해야 할 것 위주로 써줘. 말투는 친근하게."></textarea>
+            <p style="font-size:11px; color:var(--muted); margin-top:6px;">ChatGPT한테 말하듯 자유롭게 — 대상, 말투, 포인트 등 직접 지정 가능</p>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">4</span> 글 스타일</div>
-          <div class="style-select">
-            <button class="style-btn selected" data-style="emotional" onclick="selectStyle(this)">😊 감성체</button>
-            <button class="style-btn" data-style="informative" onclick="selectStyle(this)">📊 정보전달체</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title"><span class="step-badge">5</span> 글 생성</div>
+          <div class="card-title"><span class="step-badge">4</span> 글 생성</div>
           <button class="btn btn-primary" style="width:100%; justify-content:center;" id="generateBtn" onclick="handleGenerate()">
             ✨ AI 글 생성
           </button>
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">6</span> AI 이미지 생성 <span style="color:var(--muted);font-size:11px;">선택</span></div>
+          <div class="card-title"><span class="step-badge">5</span> AI 이미지 생성 <span style="color:var(--muted);font-size:11px;">선택</span></div>
           <div class="style-select" style="margin-bottom:8px;">
             <button class="style-btn selected" data-imgstyle="blog" onclick="selectImgStyle(this)">🖼️ 블로그용</button>
             <button class="style-btn" data-imgstyle="card" onclick="selectImgStyle(this)">📰 카드뉴스</button>
@@ -126,7 +118,7 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">7</span> AI 감지 우회</div>
+          <div class="card-title"><span class="step-badge">6</span> AI 감지 우회</div>
           <button class="btn btn-outline" style="width:100%; justify-content:center;" id="humanizeBtn" onclick="handleHumanize()" disabled>
             🔄 자연스럽게 다듬기
           </button>
@@ -134,7 +126,7 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="step-badge">8</span> 네이버 발행</div>
+          <div class="card-title"><span class="step-badge">7</span> 네이버 발행</div>
           <button class="btn btn-success" style="width:100%; justify-content:center;" id="publishBtn" onclick="handlePublish()" disabled>
             🚀 네이버에 올리기
           </button>

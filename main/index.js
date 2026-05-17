@@ -1,9 +1,12 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config(); // dev용 — 패키징 후엔 config.json에서 로드
 
 const { initDB, savePost, getPosts, getPost, updatePostStatus, updatePostNaverUrl, getPostsToCheck } = require('./db/database');
-const { generatePost } = require('./ai/writer');
+const { generatePost, generatePostFreeform } = require('./ai/writer');
+const { fetchNaverNews } = require('./keywords/newssearch');
+const { fetchNaverContext } = require('./keywords/naversearch');
 const { humanizePost } = require('./ai/humanizer');
 const { getLearningBoost } = require('./ai/learner');
 const { analyzeKeyword } = require('./keywords/analyzer');
@@ -63,13 +66,22 @@ ipcMain.handle('navigate', (event, page) => {
   return { success: true };
 });
 
-ipcMain.handle('post:generate', async (event, { subject, perspective, style, category }) => {
+ipcMain.handle('post:generate', async (event, { subject, keyword, userPrompt, perspective, style, category }) => {
   try {
     const learningBoost = getLearningBoost(category || 'other');
-    const { lsi, longtail } = await analyzeKeyword(subject);
-    const relatedKeywords = [...longtail, ...lsi].slice(0, 6);
-    const result = await generatePost(subject, perspective || '', style, category || 'other', learningBoost, relatedKeywords);
-    return { success: true, data: result, relatedKeywords };
+    const effectiveKeyword = keyword || subject || '';
+    let result;
+
+    const searchContext = effectiveKeyword ? await fetchNaverContext(effectiveKeyword, category || 'other') : '';
+    if (userPrompt) {
+      result = await generatePostFreeform(userPrompt, category || 'other', searchContext, effectiveKeyword, learningBoost);
+    } else {
+      const { lsi, longtail } = await analyzeKeyword(effectiveKeyword);
+      const relatedKeywords = [...longtail, ...lsi].slice(0, 6);
+      result = await generatePost(effectiveKeyword, perspective || '', style, category || 'other', learningBoost, relatedKeywords, searchContext);
+    }
+
+    return { success: true, data: result };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -192,6 +204,7 @@ ipcMain.handle('image:generate', async (event, { subject, category, style }) => 
 
 ipcMain.handle('image:open-folder', () => {
   const dir = path.join(app.getPath('userData'), 'generated-images');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   shell.openPath(dir);
   return { success: true };
 });
