@@ -11,6 +11,7 @@ const { publishToNaver } = require('./playwright/publisher');
 const { loadConfig, saveConfig } = require('./config');
 const { startScheduler, runPerformanceCheck } = require('./scheduler');
 const { generateImage } = require('./ai/imageGen');
+const { fetchTrendingKeywords } = require('./keywords/trending');
 const { shell } = require('electron');
 
 let mainWindow;
@@ -152,6 +153,15 @@ ipcMain.handle('image:open-folder', () => {
   const dir = path.join(process.cwd(), 'assets', 'generated');
   shell.openPath(dir);
   return { success: true };
+});
+
+ipcMain.handle('keywords:fetch', async (event, { forceRefresh = false } = {}) => {
+  try {
+    const result = await fetchTrendingKeywords(forceRefresh);
+    return { success: true, ...result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 ipcMain.handle('performance:pending-count', () => {

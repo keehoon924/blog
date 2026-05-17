@@ -1,14 +1,14 @@
-const SAMPLE_KEYWORDS = [
-  '자기계발', '아침루틴', '동기부여', '좋은습관', '성공마인드',
-  '재테크입문', '적금추천', '절약생활', '월급관리', '사이드잡',
-  '직장인공감', '번아웃극복', '워라밸', '퇴사고민', '커리어성장',
-];
+const CATEGORY_LABELS = {
+  daily: '일상', recipe: '요리', restaurant: '맛집',
+  economy: '경제', book: '책', car: '자동차',
+  pet: '반려동물', sports: '스포츠', other: '기타',
+};
 
-function renderKeywords() {
-  const list = document.getElementById('keywordsList');
-  list.innerHTML = SAMPLE_KEYWORDS.map(k =>
-    `<span class="keyword-chip" onclick="useKeyword('${k}')">#${k}</span>`
-  ).join('');
+function showToast(msg, type = 'info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `show ${type}`;
+  setTimeout(() => { t.className = ''; }, 3000);
 }
 
 function useKeyword(keyword) {
@@ -16,11 +16,46 @@ function useKeyword(keyword) {
   api.navigate('write');
 }
 
-function showToast(msg, type = 'info') {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = `show ${type}`;
-  setTimeout(() => { t.className = ''; }, 3000);
+function renderKeywords(keywords, source) {
+  const list = document.getElementById('keywordsList');
+  const label = document.getElementById('keywordsLabel');
+
+  if (source === 'datalab') {
+    label.innerHTML = '🔥 실시간 트렌딩 키워드 <span style="font-size:11px; color:var(--muted);">(DataLab · 최근 7일)</span>';
+  } else if (source === 'cache') {
+    label.innerHTML = '🔥 트렌딩 키워드 <span style="font-size:11px; color:var(--muted);">(캐시)</span>';
+  } else {
+    label.innerHTML = '📋 추천 키워드 <span style="font-size:11px; color:var(--muted);">(DataLab 키 미설정 — 샘플)</span>';
+  }
+
+  list.innerHTML = keywords.map(k => {
+    const catLabel = CATEGORY_LABELS[k.category] || k.category;
+    return `<span class="keyword-chip" onclick="useKeyword('${k.keyword}')">
+      <span style="font-size:10px; opacity:0.7;">${catLabel}</span> #${k.keyword}
+    </span>`;
+  }).join('');
+}
+
+async function loadKeywords(forceRefresh = false) {
+  const list = document.getElementById('keywordsList');
+  const label = document.getElementById('keywordsLabel');
+  const refreshBtn = document.getElementById('keywordsRefreshBtn');
+
+  label.innerHTML = '⏳ 키워드 불러오는 중...';
+  list.innerHTML = '<span style="color:var(--muted); font-size:13px;">DataLab에서 데이터를 가져오고 있습니다...</span>';
+  if (refreshBtn) refreshBtn.disabled = true;
+
+  const res = await api.fetchKeywords({ forceRefresh });
+
+  if (refreshBtn) refreshBtn.disabled = false;
+
+  if (!res.success) {
+    label.textContent = '⚠️ 키워드 로딩 실패';
+    list.innerHTML = '<span style="color:var(--muted); font-size:13px;">잠시 후 다시 시도해주세요.</span>';
+    return;
+  }
+
+  renderKeywords(res.keywords, res.source);
 }
 
 async function loadTodayPosts() {
@@ -58,5 +93,5 @@ function statusLabel(status) {
   return map[status] || status;
 }
 
-renderKeywords();
 loadTodayPosts();
+loadKeywords();
