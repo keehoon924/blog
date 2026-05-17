@@ -36,13 +36,28 @@ async function generateImage(subject, category = 'other', style = 'blog') {
   let prompt = promptFn(subject);
   if (style === 'card') prompt += CARD_SUFFIX;
 
-  const response = await client.images.generate({
-    model: 'dall-e-3',
-    prompt,
-    size: '1024x1024',
-    quality: 'standard',
-    n: 1,
-  });
+  let response;
+  try {
+    response = await client.images.generate({
+      model: 'dall-e-3',
+      prompt,
+      size: '1024x1024',
+      quality: 'standard',
+      n: 1,
+    });
+  } catch (err) {
+    // dall-e-3 접근 권한 없을 경우 dall-e-2로 폴백
+    if (err.status === 400 || err.status === 404) {
+      response = await client.images.generate({
+        model: 'dall-e-2',
+        prompt: prompt.slice(0, 900), // dall-e-2는 프롬프트 1000자 제한
+        size: '1024x1024',
+        n: 1,
+      });
+    } else {
+      throw err;
+    }
+  }
 
   const imageUrl = response.data[0].url;
 
