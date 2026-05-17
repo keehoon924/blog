@@ -1,14 +1,17 @@
 const OpenAI = require('openai');
+const { app } = require('electron');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-const GENERATED_DIR = path.join(process.cwd(), 'assets', 'generated');
+function getGeneratedDir() {
+  return path.join(app.getPath('userData'), 'generated-images');
+}
 
 function ensureDir() {
-  if (!fs.existsSync(GENERATED_DIR)) {
-    fs.mkdirSync(GENERATED_DIR, { recursive: true });
-  }
+  const dir = getGeneratedDir();
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 // 카테고리별 DALL-E 3 프롬프트
@@ -28,7 +31,7 @@ const IMAGE_PROMPTS = {
 const CARD_SUFFIX = ' Simple clean background with space for text overlay. Bold graphic design style, flat colors.';
 
 async function generateImage(subject, category = 'other', style = 'blog') {
-  ensureDir();
+  const GENERATED_DIR = ensureDir();
 
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
