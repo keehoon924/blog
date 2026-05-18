@@ -24,6 +24,10 @@ function stripImagePlaceholders(content) {
   return content.replace(/\[이미지:[^\]]*\]/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function stripDividerMarkers(content) {
+  return content.replace(/\[구분선\]|\[짧은구분선\]/g, '').replace(/\n{3,}/g, '\n\n');
+}
+
 function stripContentArtifacts(text) {
   return text
     .replace(/\n*\**\s*HASHTAGS\s*:?[\s\S]*$/i, '')
@@ -37,7 +41,7 @@ function makeReadable(text) {
   const lines = text.split('\n');
   const out = [];
   for (const line of lines) {
-    if (/^\s*\[(구분선|짧은구분선|인용구:|이미지:)/.test(line)) {
+    if (/^\s*\[(인용구:|이미지)/.test(line)) {
       out.push(line);
       continue;
     }
@@ -53,7 +57,7 @@ function makeReadable(text) {
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-// \n을 Enter 키로 변환해서 입력 (page.keyboard.type는 \n을 Enter로 처리 안 함)
+// \n을 Enter 키로 변환해서 입력
 async function slowType(page, text) {
   const parts = text.split('\n');
   for (let i = 0; i < parts.length; i++) {
@@ -89,7 +93,7 @@ async function typeWithFormatting(page, text) {
   }
 }
 
-// SE5 툴바 버튼 클릭 — data-name 속성 기반 (dom-dump.json으로 확인된 실제 구조)
+// SE5 툴바 버튼 클릭 — data-name 속성 기반
 async function clickToolbarBtn(page, dataName, dataType = null) {
   let selector = `button[data-name="${dataName}"]`;
   if (dataType) selector += `[data-type="${dataType}"]`;
@@ -103,12 +107,11 @@ async function clickToolbarBtn(page, dataName, dataType = null) {
   return false;
 }
 
-// 가운데 정렬: 드롭다운 열기 → center 선택
-// 확인된 구조: data-name="align-drop-down-with-justify" + data-value="center"
-async function clickAlignCenter(page) {
+// 정렬 적용 (center | left | right)
+async function applyAlign(page, alignType) {
   await clickToolbarBtn(page, 'align-drop-down-with-justify', 'drop-down');
   await page.waitForTimeout(300);
-  const btn = await page.$('button[data-name="align-drop-down-with-justify"][data-value="center"]');
+  const btn = await page.$(`button[data-name="align-drop-down-with-justify"][data-value="${alignType}"]`);
   if (btn) {
     await btn.click();
     await page.waitForTimeout(300);
@@ -117,7 +120,34 @@ async function clickAlignCenter(page) {
   return false;
 }
 
-// Insert 인용구 — 확인된 셀렉터 + ArrowDown 탈출
+// 이미지 업로드 — 사진 추가 버튼 클릭 → filechooser에 로컬 파일 전달
+async function insertImage(page, imagePath) {
+  if (!imagePath) return false;
+  const photoBtn = await page.$('button[data-name="image"]');
+  if (!photoBtn) {
+    console.error('[insertImage] 사진 추가 버튼 못 찾음');
+    return false;
+  }
+
+  const fcPromise = page.waitForEvent('filechooser', { timeout: 6000 }).catch(() => null);
+  await photoBtn.click();
+  const fileChooser = await fcPromise;
+  if (!fileChooser) {
+    console.error('[insertImage] file chooser 안 열림');
+    return false;
+  }
+
+  await fileChooser.setFiles(imagePath);
+  // 네이버 서버 업로드 대기 (파일 크기에 따라 다름)
+  await page.waitForTimeout(4000);
+
+  // 커서를 이미지 다음 줄로 이동
+  await page.keyboard.press('End');
+  await page.waitForTimeout(300);
+  return true;
+}
+
+// 인용구 삽입 — 모든 이동은 클릭으로 (Enter/ArrowDown 사용 금지)
 // quoteRaw 형식: "인용문 | – 출처명" 또는 "인용문"
 async function insertQuote(page, quoteRaw) {
   const pipeIdx = quoteRaw.indexOf(' | ');
@@ -125,66 +155,117 @@ async function insertQuote(page, quoteRaw) {
   const attribution = pipeIdx !== -1 ? quoteRaw.slice(pipeIdx + 3).trim() : '';
 
   const clicked = await clickToolbarBtn(page, 'quotation', 'icon-select');
-  if (clicked) {
-    await page.waitForTimeout(300);
-    await slowType(page, quoteText);
-    if (attribution) {
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(150);
-      await slowType(page, attribution);
-    }
-    // 블록 탈출: ArrowDown (dom-dump D4_exitMethod = "ArrowDown"으로 확인)
-    await page.keyboard.press('ArrowDown');
-    await page.waitForTimeout(400);
-  } else {
-    const full = attribution ? `${quoteText}\n${attribution}` : quoteText;
-    await page.keyboard.type(`❝ ${full} ❞`);
-    await page.keyboard.press('Enter');
-    await page.keyboard.press('Enter');
-  }
-}
-
-// 카테고리별 정렬 정책
-const ALIGN_POLICY = {
-  daily:      { body: 'left',   accent: 'center' },
-  recipe:     { body: 'left',   accent: 'center' },
-  restaurant: { body: 'left',   accent: 'center' },
-  economy:    { body: 'left',   accent: 'left'   },
-  book:       { body: 'center', accent: 'center' },
-  car:        { body: 'left',   accent: 'left'   },
-  pet:        { body: 'left',   accent: 'center' },
-  sports:     { body: 'left',   accent: 'left'   },
-  other:      { body: 'left',   accent: 'center' },
-};
-
-// Insert 구분선 — 확인된 셀렉터
-async function insertDivider(page) {
-  const clicked = await clickToolbarBtn(page, 'horizontal-line', 'icon-select');
   if (!clicked) {
-    await page.keyboard.type('─────────────────────────');
+    // 툴바 버튼 없을 때 대체 텍스트로 삽입
+    const full = attribution ? `❝ ${quoteText} ❞\n— ${attribution}` : `❝ ${quoteText} ❞`;
+    await slowType(page, full);
     await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    return;
   }
-  await page.waitForTimeout(200);
+
+  // 인용구 블록이 생성될 때까지 대기
+  await page.waitForTimeout(800);
+
+  // ── 1단계: 인용구 내용 영역 클릭 후 입력 ──
+  await page.evaluate(() => {
+    const mods = document.querySelectorAll('.se-module-quotation');
+    const last = mods[mods.length - 1];
+    if (!last) return;
+    // 첫 번째 텍스트 단락 (내용 입력 영역)
+    const para = last.querySelector('.se-text-paragraph');
+    if (para) para.click();
+  });
+  await page.waitForTimeout(400);
+  await page.keyboard.type(quoteText, { delay: 18 });
+
+  // ── 2단계: 출처 영역 클릭 후 입력 ──
+  if (attribution) {
+    await page.evaluate(() => {
+      const mods = document.querySelectorAll('.se-module-quotation');
+      const last = mods[mods.length - 1];
+      if (!last) return;
+      // 출처는 cite 태그 안 또는 두 번째 텍스트 단락
+      const cite = last.querySelector('cite .se-text-paragraph')
+        || last.querySelector('cite')
+        || last.querySelectorAll('.se-text-paragraph')[1];
+      if (cite) cite.click();
+    });
+    await page.waitForTimeout(400);
+    await page.keyboard.type(attribution, { delay: 18 });
+  }
+
+  // ── 3단계: 인용구 블록 바깥 본문 영역 클릭으로 탈출 ──
+  await page.waitForTimeout(400);
+  const exited = await page.evaluate(() => {
+    const mods = document.querySelectorAll('.se-module-quotation');
+    const last = mods[mods.length - 1];
+    if (!last) return false;
+
+    // 인용구 블록 다음 형제 요소에서 클릭 가능한 단락 찾기
+    let sibling = last.nextElementSibling;
+    while (sibling) {
+      const para = sibling.querySelector
+        ? (sibling.querySelector('.se-text-paragraph') ||
+           (sibling.classList && sibling.classList.contains('se-text-paragraph') ? sibling : null))
+        : null;
+      if (para) {
+        para.click();
+        return true;
+      }
+      sibling = sibling.nextElementSibling;
+    }
+    return false;
+  });
+
+  if (!exited) {
+    // 다음 형제가 없으면 메인 섹션 끝 부분 클릭
+    const box = await page.evaluate(() => {
+      const main = document.querySelector('.se-main-section');
+      if (!main) return null;
+      const rect = main.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height - 40 };
+    });
+    if (box) {
+      await page.mouse.click(box.x, box.y);
+    }
+  }
+  await page.waitForTimeout(500);
 }
 
-// 본문 마커([구분선], [인용구:]) 파싱 후 타이핑
-async function typeContentWithMarkers(page, content) {
+// 본문 마커([인용구:...], [이미지]) 파싱 후 타이핑
+// images: 사용자 [이미지] 마커 순서대로 매칭할 로컬 파일 경로 배열
+async function typeContentWithMarkers(page, content, images = []) {
   const stage1 = stripContentArtifacts(content);
-  const stage2 = stripImagePlaceholders(stage1);
-  const cleaned = makeReadable(stage2);
-  const markerRegex = /\[구분선\]|\[짧은구분선\]|\[인용구:([^\]]+)\]/g;
+  const stage2 = stripDividerMarkers(stage1);
+  const stage3 = stripImagePlaceholders(stage2);  // AI [이미지:hint] 제거, 사용자 [이미지]는 보존
+  const cleaned = makeReadable(stage3);
+  // 인용구(콜론 있음) + 이미지(콜론 없음, 단독) 통합 매칭
+  const markerRegex = /\[(인용구:[^\]]+|이미지)\]/g;
   let lastIndex = 0;
+  let imageIndex = 0;
   let match;
 
   while ((match = markerRegex.exec(cleaned)) !== null) {
     if (match.index > lastIndex) {
       await typeWithFormatting(page, cleaned.slice(lastIndex, match.index));
     }
-    if (match[0] === '[구분선]' || match[0] === '[짧은구분선]') {
-      await insertDivider(page);
-    } else {
-      await insertQuote(page, match[1].trim());
+
+    const marker = match[1];
+    if (marker.startsWith('인용구:')) {
+      await insertQuote(page, marker.slice(3).trim());
+      // 인용구 탈출 후 가운데 정렬 재적용
+      await applyAlign(page, 'center');
+      await page.waitForTimeout(300);
+    } else if (marker === '이미지') {
+      if (imageIndex < images.length) {
+        await insertImage(page, images[imageIndex]);
+        imageIndex++;
+      } else {
+        console.warn(`[이미지] 마커 ${imageIndex + 1}번째이지만 업로드할 이미지 부족 — 건너뜀`);
+      }
     }
+
     lastIndex = match.index + match[0].length;
   }
 
@@ -204,7 +285,6 @@ async function typeRelatedPosts(page, relatedPosts) {
   if (!relatedPosts || relatedPosts.length === 0) return;
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
-  await insertDivider(page);
   await page.keyboard.press('Control+b');
   await page.keyboard.type('▼ 함께 읽으면 좋은 글', { delay: 20 });
   await page.keyboard.press('Control+b');
@@ -212,6 +292,10 @@ async function typeRelatedPosts(page, relatedPosts) {
   for (const post of relatedPosts) {
     await page.keyboard.type(`• ${post.title}`, { delay: 20 });
     await page.keyboard.press('Enter');
+    if (post.naver_url) {
+      await page.keyboard.type(`  ${post.naver_url}`, { delay: 15 });
+      await page.keyboard.press('Enter');
+    }
   }
 }
 
@@ -240,14 +324,122 @@ async function doLogin(page, id, pw) {
   );
 }
 
-async function publishToNaver({ title, content, hashtags, relatedPosts, config, category = 'other' }) {
-  const policy = ALIGN_POLICY[category] || ALIGN_POLICY.other;
+// 자동 발행 — 발행 다이얼로그 진입 후 다이얼로그 내 '발행' 버튼 클릭
+async function autoFinalizePublish(page) {
+  const topBtn = await page.$('button.publish_btn__m9KHH');
+  if (!topBtn) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
+  await topBtn.click();
+
+  await page.waitForSelector('[class*="layer_publish"]', { timeout: 10000 });
+  await page.waitForTimeout(1800);
+
+  const finalBtn = await page.$('[class*="layer_publish"] button.publish_btn__m9KHH');
+  if (!finalBtn) throw new Error('다이얼로그 내 최종 발행 버튼을 찾을 수 없습니다.');
+  await finalBtn.click();
+
+  await page.waitForTimeout(5000);
+}
+
+// 예약 발행 — scheduledAt: Date 객체 또는 ISO 문자열
+// 네이버 제약: 분은 10분 단위 (00/10/20/30/40/50), 과거 시간 불가
+async function autoFinalizeScheduledPublish(page, scheduledAt) {
+  const target = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
+  if (isNaN(target.getTime())) throw new Error('예약 시간 형식 오류: ' + scheduledAt);
+
+  const targetYear  = target.getFullYear();
+  const targetMonth = target.getMonth() + 1;
+  const targetDay   = target.getDate();
+  const targetHour  = target.getHours();
+  const rawMinute   = target.getMinutes();
+  // 분 10분 단위 반올림 (네이버 제약), 최대 50
+  const targetMinute = Math.min(Math.round(rawMinute / 10) * 10, 50);
+
+  // 1) 우상단 발행 버튼 → 다이얼로그 열림
+  const topBtn = await page.$('button.publish_btn__m9KHH');
+  if (!topBtn) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
+  await topBtn.click();
+  await page.waitForSelector('[class*="layer_publish"]', { timeout: 10000 });
+  await page.waitForTimeout(1800);
+
+  // 2) "예약" 라디오 라벨 클릭 (radio_time2)
+  const reserveLabel = await page.$('label[for="radio_time2"]');
+  if (!reserveLabel) throw new Error('예약 라디오 라벨을 찾을 수 없습니다.');
+  await reserveLabel.click();
+  await page.waitForTimeout(1000);
+
+  // 3) 날짜 input 클릭 → jQuery UI datepicker 열림
+  const dateInput = await page.$('input.input_date__QmA0s');
+  if (!dateInput) throw new Error('날짜 input을 찾을 수 없습니다.');
+  await dateInput.click();
+  await page.waitForTimeout(800);
+
+  // 4) 목표 달까지 next 버튼으로 이동 (최대 24개월)
+  for (let i = 0; i < 24; i++) {
+    const current = await page.evaluate(() => {
+      const y = document.querySelector('.ui-datepicker-year');
+      const m = document.querySelector('.ui-datepicker-month');
+      if (!y || !m) return null;
+      return {
+        year:  parseInt(y.textContent.trim(), 10),
+        month: parseInt(m.textContent.replace('월', '').trim(), 10),
+      };
+    });
+    if (!current) throw new Error('캘린더 헤더(년/월)를 읽을 수 없습니다.');
+    if (current.year === targetYear && current.month === targetMonth) break;
+    if (current.year > targetYear || (current.year === targetYear && current.month > targetMonth)) {
+      throw new Error(`목표 ${targetYear}-${targetMonth}이(가) 현재 표시 ${current.year}-${current.month}보다 과거 — 예약 불가`);
+    }
+    const nextBtn = await page.$('button.ui-datepicker-next:not(.ui-state-disabled)');
+    if (!nextBtn) throw new Error('다음달 버튼이 비활성화되어 더 이상 진행 불가');
+    await nextBtn.click();
+    await page.waitForTimeout(400);
+  }
+
+  // 5) 목표 날짜 버튼 클릭 (활성화된 td 안의 button만)
+  const dayResult = await page.evaluate((day) => {
+    const buttons = Array.from(document.querySelectorAll('.ui-datepicker td:not(.ui-state-disabled) > button.ui-state-default'));
+    const btn = buttons.find(b => b.textContent.trim() === String(day));
+    if (!btn) return { error: `${day}일 클릭 불가 (이미 지났거나 비활성)` };
+    btn.click();
+    return { clicked: true };
+  }, targetDay);
+  if (dayResult.error) throw new Error(dayResult.error);
+  await page.waitForTimeout(800);
+
+  // 6) 시간 select 변경
+  await page.selectOption('select.hour_option__J_heO', String(targetHour).padStart(2, '0'));
+  await page.waitForTimeout(400);
+
+  // 7) 분 select 변경 (10분 단위)
+  await page.selectOption('select.minute_option__Vb3xB', String(targetMinute).padStart(2, '0'));
+  await page.waitForTimeout(400);
+
+  // 8) 다이얼로그 내 "발행" 버튼 클릭 — 예약 모드이므로 자동 예약 등록
+  const finalBtn = await page.$('[class*="layer_publish"] button.publish_btn__m9KHH');
+  if (!finalBtn) throw new Error('다이얼로그 내 발행 버튼을 찾을 수 없습니다.');
+  await finalBtn.click();
+
+  // 예약 등록 완료 대기
+  await page.waitForTimeout(5000);
+}
+
+// '작성 중인 글이 있습니다' 팝업이 뜨면 '취소' 클릭 (새 글로 시작)
+async function dismissDraftPopup(page) {
+  try {
+    await page.evaluate(() => {
+      document.querySelectorAll('button').forEach(b => {
+        if (b.textContent.trim() === '취소' && b.closest('.se-popup-container')) b.click();
+      });
+    });
+  } catch (_) {}
+}
+
+async function publishToNaver({ title, content, hashtags, relatedPosts, config, category = 'other', autoPublish = false, images = [], scheduledAt = null }) {
   const naverID = config.naverID || process.env.NAVER_ID;
   const naverPW = config.naverPW || process.env.NAVER_PW;
 
   if (!naverID || !naverPW) throw new Error('네이버 아이디/비밀번호가 설정되지 않았습니다.');
 
-  // channel: 'chrome' uses the user's installed Chrome — no separate browser download needed
   const browser = await chromium.launch({
     headless: false,
     slowMo: 20,
@@ -277,7 +469,11 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
 
   await page.waitForTimeout(2500);
 
-  // ── Step 1: 제목 입력 (.se-title-text 확인됨) ──
+  // ── Step 0: 작성 중인 글 팝업이 있으면 '취소'로 새로 시작 ──
+  await dismissDraftPopup(page);
+  await page.waitForTimeout(800);
+
+  // ── Step 1: 제목 입력 ──
   const titleEl = await page.$('.se-title-text');
   if (titleEl) {
     await titleEl.scrollIntoViewIfNeeded();
@@ -295,19 +491,15 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
   await page.waitForTimeout(800);
 
   // ── Step 2: 본문 영역으로 이동 ──
-  // Enter 키 → 포커스가 IFRAME(에디터 콘텐츠 영역)으로 이동 (B_focusAfterEnter로 확인됨)
   await page.keyboard.press('Enter');
   await page.waitForTimeout(500);
 
-  // ── Step 2-1: center 정렬 카테고리(book)는 첫 단락 시작 전 적용 ──
-  // 드롭다운 → center 선택 (C2_dropdownContent로 확인된 구조)
-  if (policy.body === 'center') {
-    await clickAlignCenter(page);
-    await page.waitForTimeout(300);
-  }
+  // ── Step 2-1: 본문 가운데 정렬 — 항상 적용 (1회 설정으로 이후 전체 본문 자동 적용) ──
+  await applyAlign(page, 'center');
+  await page.waitForTimeout(400);
 
-  // ── Step 3: 본문 입력 ──
-  await typeContentWithMarkers(page, content);
+  // ── Step 3: 본문 입력 (이미지 마커 포함) ──
+  await typeContentWithMarkers(page, content, images);
 
   // ── Step 4: 커서를 끝으로 ──
   await page.keyboard.press('Control+End');
@@ -319,7 +511,14 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
   // ── Step 6: 관련 글 ──
   await typeRelatedPosts(page, relatedPosts);
 
-  // 브라우저 열린 상태 유지 — 사용자가 이미지 추가 후 직접 발행
+  // ── Step 7: 발행 분기 — 예약 발행 / 즉시 자동 발행 / 수동 (브라우저 열린 채로) ──
+  if (scheduledAt) {
+    await page.waitForTimeout(1500);
+    await autoFinalizeScheduledPublish(page, scheduledAt);
+  } else if (autoPublish) {
+    await page.waitForTimeout(1500);
+    await autoFinalizePublish(page);
+  }
 }
 
 module.exports = { publishToNaver };
