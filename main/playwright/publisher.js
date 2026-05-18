@@ -344,7 +344,7 @@ async function doLogin(page, id, pw) {
 async function autoFinalizePublish(page) {
   const topBtn = await page.$('button.publish_btn__m9KHH');
   if (!topBtn) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
-  await topBtn.click();
+  await topBtn.click({ force: true });
 
   // 다이얼로그 열림 확인 — 라디오 또는 컨테이너 둘 다 허용
   await page.waitForSelector('input[name="radio_time"], [class*="layer_publish"], [class*="publish_layer"]', { timeout: 10000 });
@@ -356,124 +356,98 @@ async function autoFinalizePublish(page) {
   await page.waitForTimeout(5000);
 }
 
-// 다이얼로그 내 발행 버튼 클릭 — Playwright의 실제 click() 사용 (React 호환)
-async function clickDialogPublishBtn(page) {
-  // 모든 publish_btn 핸들 가져와서 visible만 필터
-  const allHandles = await page.$$('button.publish_btn__m9KHH');
-  const visibleHandles = [];
-  for (const h of allHandles) {
-    if (await h.isVisible().catch(() => false)) visibleHandles.push(h);
-  }
-  if (visibleHandles.length === 0) throw new Error('발행 버튼이 화면에 없음 (visible 0개)');
-
-  // 다이얼로그/팝업 안에 있는 버튼 찾기 (부모 체인 walk)
-  let targetIdx = -1;
-  for (let i = 0; i < visibleHandles.length; i++) {
-    const isInDialog = await visibleHandles[i].evaluate(el => {
-      let parent = el.parentElement;
-      while (parent && parent !== document.body) {
-        const cls = ((parent.className || '') + '').toLowerCase();
-        if (cls.includes('layer_publish') || cls.includes('publish_layer') ||
-            cls.includes('publish_setting') || cls.includes('publish_set') ||
-            cls.includes('popup_publish') || cls.includes('se-popup') ||
-            cls.includes('publish_dialog')) {
-          return true;
-        }
-        parent = parent.parentElement;
-      }
-      return false;
-    }).catch(() => false);
-    if (isInDialog) { targetIdx = i; break; }
-  }
-  // Fallback: 다이얼로그 안 버튼 못 찾으면 마지막 visible (다이얼로그가 후순위 렌더)
-  if (targetIdx === -1 && visibleHandles.length > 1) targetIdx = visibleHandles.length - 1;
-  if (targetIdx === -1) targetIdx = 0;
-
-  console.log(`[발행 버튼] 보이는 ${visibleHandles.length}개 중 ${targetIdx + 1}번째 클릭 시도`);
-
-  const target = visibleHandles[targetIdx];
-  await target.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(400);
-
-  // Playwright의 실제 마우스 click (DOM .click()이 React 핸들러 안 트리거할 때 있음)
-  await target.click({ delay: 50 });
-  await page.waitForTimeout(2500);
-
-  // 클릭 검증 — 다이얼로그 닫혔는지 / 예약 라디오 사라졌는지
-  const radioStillVisible = await page.evaluate(() => {
-    const r = document.querySelector('input#radio_time2');
-    if (!r) return false;
-    const rect = r.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+// layer_popup 드롭다운 강제 닫기 (layer_publish 다이얼로그 제외)
+async function forceCloseLayerPopup(page) {
+  await page.evaluate(() => {
+    document.querySelectorAll('[class*="layer_popup"]').forEach(el => {
+      if (el.className.includes('layer_publish')) return;
+      [...el.classList].filter(c => c.includes('is_show')).forEach(c => el.classList.remove(c));
+      el.style.display = 'none';
+    });
   });
-  if (radioStillVisible) {
-    // 한 번 더 시도 (Playwright force click)
-    console.warn('[발행 버튼] 1차 클릭 후 다이얼로그 여전히 열림 — force click 재시도');
-    await target.click({ force: true, delay: 100 });
-    await page.waitForTimeout(2500);
-  }
-  return { clicked: true, idx: targetIdx, total: visibleHandles.length };
+  await page.waitForTimeout(400);
 }
 
-// 카테고리 설정 (옵션) — 다이얼로그 내 카테고리 드롭다운에서 텍스트 매칭으로 선택
+// 다이얼로그 내 발행 버튼 클릭
+// 클릭 기록 확인: cls="confirm_btn__WEaBq" (다이얼로그 하단 확인 버튼)
+// dispatchEvent 직접 사용 — Playwright 포인터/가시성 체크 완전 우회 (테스트 검증됨)
+async function clickDialogPublishBtn(page) {
+  const result = await page.evaluate(() => {
+    const btn = document.querySelector('button.confirm_btn__WEaBq');
+    if (!btn) return { ok: false, reason: '버튼 없음' };
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return { ok: true };
+  });
+  console.log(`[발행 버튼] confirm_btn__WEaBq dispatchEvent → ${JSON.stringify(result)}`);
+  if (!result.ok) throw new Error('발행 버튼 클릭 실패: ' + result.reason);
+
+  await page.waitForTimeout(3000);
+
+  const stillOpen = await page.evaluate(() => {
+    const r = document.querySelector('input#radio_time2');
+    if (!r) return false;
+    return r.getBoundingClientRect().width > 0;
+  });
+  if (stillOpen) {
+    console.warn('[발행 버튼] 다이얼로그 여전히 열림 — dispatchEvent 재시도');
+    await page.evaluate(() => {
+      const btn = document.querySelector('button.confirm_btn__WEaBq');
+      if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    });
+    await page.waitForTimeout(3000);
+  }
+  return { clicked: true };
+}
+
+// 카테고리 설정 — 클릭 기록으로 확인된 정확한 셀렉터 사용
+// 드롭다운: button.selectbox_button__jb1Dt / 옵션: label.radio_label__mB6ia
 async function selectNaverCategory(page, categoryName) {
   if (!categoryName || !categoryName.trim()) return { skipped: true };
   const name = categoryName.trim();
   try {
-    const catBtn = await page.$('button[aria-label="카테고리 목록 버튼"]');
-    if (!catBtn) return { error: '카테고리 드롭다운 버튼 못 찾음 (다이얼로그 미오픈?)' };
-    await catBtn.click();
-    await page.waitForTimeout(1200); // 드롭다운 애니메이션 + 렌더
+    const catBtn = await page.$('button.selectbox_button__jb1Dt');
+    if (!catBtn) return { error: '카테고리 드롭다운 버튼 없음' };
+    await catBtn.click({ force: true });
+    await page.waitForTimeout(1200);
 
-    // visible한 카테고리 옵션 모두 수집 → 3단계 매칭
-    const result = await page.evaluate((catName) => {
-      const isVisible = (el) => {
+    // 클릭 기록 확인: 카테고리 옵션은 label.radio_label__mB6ia
+    const labels = await page.$$('label.radio_label__mB6ia');
+    let target = null;
+
+    for (const lbl of labels) {
+      const txt = await lbl.evaluate(el => {
         const r = el.getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      };
-      const candidates = Array.from(document.querySelectorAll(
-        'a, button, li, [role="option"], [role="menuitem"], span'
-      )).filter(isVisible);
-
-      const items = candidates.map(el => ({
-        el,
-        text: el.textContent.trim(),
-      })).filter(x => x.text.length > 0 && x.text.length < 60);
-
-      // 1차: 정확 매칭
-      for (const it of items) {
-        if (it.text === catName) {
-          it.el.click();
-          return { method: 'exact', clicked: it.text };
-        }
-      }
-      // 2차: 접두/접미 + 공백 (예: "맛집 (5)")
-      for (const it of items) {
-        if (it.text.startsWith(catName + ' ') || it.text.startsWith(catName + '(')) {
-          it.el.click();
-          return { method: 'prefix', clicked: it.text };
-        }
-      }
-      // 3차: contains (작은 차이 허용)
-      for (const it of items) {
-        if (it.text.includes(catName)) {
-          it.el.click();
-          return { method: 'contains', clicked: it.text };
-        }
-      }
-
-      // 못 찾음 — 사용 가능한 카테고리 목록 디버그용 반환
-      const uniqueTexts = [...new Set(items.map(i => i.text))].slice(0, 30);
-      return { error: `"${catName}" 옵션 없음`, available: uniqueTexts };
-    }, name);
-
-    await page.waitForTimeout(500);
-    if (result.error && result.available) {
-      console.warn(`[카테고리] ${result.error}\n  사용 가능한 옵션: ${result.available.join(', ')}`);
-    } else if (result.clicked) {
-      console.log(`[카테고리] ${result.method} 매칭: "${result.clicked}" 클릭됨`);
+        return r.width > 0 && r.height > 0 ? el.textContent.trim() : '';
+      });
+      if (txt === name) { target = lbl; break; }
     }
-    return result;
+    if (!target) {
+      for (const lbl of labels) {
+        const txt = await lbl.evaluate(el => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 ? el.textContent.trim() : '';
+        });
+        if (txt && txt.includes(name)) { target = lbl; break; }
+      }
+    }
+
+    if (!target) {
+      const available = [];
+      for (const lbl of labels) {
+        const txt = await lbl.evaluate(el => el.textContent.trim());
+        if (txt) available.push(txt);
+      }
+      console.warn(`[카테고리] "${name}" 없음. 사용 가능: ${available.slice(0, 20).join(', ')}`);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(500);
+      return { error: `"${name}" 없음` };
+    }
+
+    await target.click({ force: true });
+    console.log(`[카테고리] "${name}" 클릭됨`);
+    await page.waitForTimeout(800);
+    await forceCloseLayerPopup(page);
+    return { clicked: name };
   } catch (err) {
     return { error: err.message };
   }
@@ -493,10 +467,10 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
   // 분 10분 단위 반올림 (네이버 제약), 최대 50
   const targetMinute = Math.min(Math.round(rawMinute / 10) * 10, 50);
 
-  // 1) 우상단 발행 버튼 → 다이얼로그 열림
+  // 1) 우상단 발행 버튼 → 다이얼로그 열림 (force:true — 도움말 패널이 겹쳐도 통과)
   const topBtn = await page.$('button.publish_btn__m9KHH');
   if (!topBtn) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
-  await topBtn.click();
+  await topBtn.click({ force: true });
   // 다이얼로그 열림 확인 — 예약 라디오로
   await page.waitForSelector('input#radio_time2, input[name="radio_time"]', { timeout: 10000 });
   await page.waitForTimeout(1800);
@@ -506,6 +480,8 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
     const catResult = await selectNaverCategory(page, naverCategory);
     if (catResult.error) console.warn('[카테고리 설정] ' + catResult.error);
     else if (catResult.clicked) console.log('[카테고리 설정] "' + naverCategory + '" 선택됨');
+    // selectNaverCategory 내부에서 forceCloseLayerPopup 이미 호출됨
+    await page.waitForTimeout(500);
   }
 
   // 3) "예약" 라디오 라벨 클릭 (radio_time2)
@@ -579,6 +555,53 @@ async function dismissDraftPopup(page) {
   } catch (_) {}
 }
 
+// 네이버 에디터 우측 '도움말' 패널 닫기 (테스트 검증됨)
+// 닫기 버튼 클릭 시도 → 5초 안에 안 사라지면 CSS 강제 숨김
+async function dismissHelpPanel(page) {
+  try {
+    // 패널이 없으면 건너뜀
+    const hasPanel = await page.evaluate(() => {
+      const el = document.querySelector('.se-help-title, h1.se-help-title, [class*="help_title"]');
+      return el ? el.getBoundingClientRect().height > 0 : false;
+    });
+    if (!hasPanel) return;
+
+    // 클릭 기록으로 확인된 정확한 닫기 버튼 클래스
+    const closeBtn = await page.$('button.se-help-panel-close-button');
+    if (closeBtn) {
+      await closeBtn.click({ force: true });
+    }
+    await page.waitForTimeout(600);
+
+    // 패널 사라질 때까지 최대 5초 대기
+    for (let i = 0; i < 10; i++) {
+      await page.waitForTimeout(500);
+      const still = await page.evaluate(() => {
+        const el = document.querySelector('.se-help-title, h1.se-help-title, [class*="help_title"]');
+        return el ? el.getBoundingClientRect().height > 0 : false;
+      });
+      if (!still) { console.log('[도움말] 패널 닫힘 확인'); return; }
+    }
+
+    // 5초 후에도 남아있으면 CSS 강제 숨김 (se-help-title 부모 컨테이너)
+    await page.evaluate(() => {
+      const title = document.querySelector('.se-help-title, h1.se-help-title, [class*="help_title"]');
+      if (!title) return;
+      let el = title.parentElement;
+      while (el && el !== document.body) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 200 && r.height > 200) {
+          el.style.setProperty('display', 'none', 'important');
+          console.log('[도움말] 강제 숨김:', el.className.slice(0, 60));
+          break;
+        }
+        el = el.parentElement;
+      }
+    });
+    await page.waitForTimeout(300);
+  } catch (_) {}
+}
+
 async function publishToNaver({ title, content, hashtags, relatedPosts, config, category = 'other', autoPublish = false, images = [], scheduledAt = null, naverCategory = '' }) {
   const naverID = config.naverID || process.env.NAVER_ID;
   const naverPW = config.naverPW || process.env.NAVER_PW;
@@ -614,7 +637,8 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
 
   await page.waitForTimeout(2500);
 
-  // ── Step 0: 작성 중인 글 팝업이 있으면 '취소'로 새로 시작 ──
+  // ── Step 0: 도움말 패널 + 작성 중인 글 팝업 닫기 ──
+  await dismissHelpPanel(page);
   await dismissDraftPopup(page);
   await page.waitForTimeout(800);
 

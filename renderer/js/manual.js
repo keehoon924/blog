@@ -231,14 +231,14 @@ async function handleImageSlotDrop(event, cardId, slotIdx) {
   event.target.closest('.img-slot').classList.remove('dragover');
   const file = event.dataTransfer.files[0];
   if (!file) return;
-  // Electron drag-drop은 file.path 노출 (sandbox:false 환경에서)
-  const filePath = file.path;
-  if (!filePath) {
-    showToast('드래그로 추가 안 됨 — 클릭해서 선택해주세요', 'error');
-    return;
-  }
   if (!/\.(jpe?g|png|gif|bmp|heic|heif|webp)$/i.test(file.name)) {
     showToast('지원 형식: jpg/png/gif/bmp/heic/heif/webp', 'error');
+    return;
+  }
+  // Electron 31: file.path 제거됨 → webUtils.getPathForFile 사용
+  const filePath = api.getPathForFile(file);
+  if (!filePath) {
+    showToast('드래그로 경로를 읽을 수 없습니다 — 클릭해서 선택해주세요', 'error');
     return;
   }
   const card = cards.find(c => c.id === cardId);

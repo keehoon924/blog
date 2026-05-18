@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   navigate: (page) => ipcRenderer.invoke('navigate', page),
@@ -25,4 +25,6 @@ contextBridge.exposeInMainWorld('api', {
   manualReadImageThumbnail: (imagePath) => ipcRenderer.invoke('manual:read-image-thumbnail', imagePath),
   manualPublishAll: (data) => ipcRenderer.invoke('manual:publish-all', data),
   onManualProgress: (callback) => ipcRenderer.on('manual:progress', (_event, info) => callback(info)),
+  // Electron 31: file.path 대신 webUtils 사용 (contextIsolation 환경에서 드래그 파일 경로)
+  getPathForFile: (file) => webUtils.getPathForFile(file),
 });

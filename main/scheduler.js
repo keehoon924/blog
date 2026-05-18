@@ -136,9 +136,9 @@ async function runAutoPublish(category, style = 'emotional') {
     // 4. Save → 'scheduled'
     postId = savePost({ subject, style, category, title, content, hashtags, status: 'scheduled' });
 
-    // 5. Publish
+    // 5. Publish (완전자동 모드 — autoPublish: true로 발행 버튼까지 자동 클릭)
     const relatedPosts = getRelatedPosts(category, postId);
-    await publishToNaver({ title, content, hashtags, relatedPosts, config, category });
+    await publishToNaver({ title, content, hashtags, relatedPosts, config, category, autoPublish: true });
 
     // 6. Done
     updatePostStatus(postId, 'published');
