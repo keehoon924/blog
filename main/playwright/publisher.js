@@ -330,19 +330,90 @@ async function autoFinalizePublish(page) {
   if (!topBtn) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
   await topBtn.click();
 
-  await page.waitForSelector('[class*="layer_publish"]', { timeout: 10000 });
+  // 다이얼로그 열림 확인 — 라디오 또는 컨테이너 둘 다 허용
+  await page.waitForSelector('input[name="radio_time"], [class*="layer_publish"], [class*="publish_layer"]', { timeout: 10000 });
   await page.waitForTimeout(1800);
 
-  const finalBtn = await page.$('[class*="layer_publish"] button.publish_btn__m9KHH');
-  if (!finalBtn) throw new Error('다이얼로그 내 최종 발행 버튼을 찾을 수 없습니다.');
-  await finalBtn.click();
+  // robust selector로 다이얼로그 내 발행 버튼 클릭
+  await clickDialogPublishBtn(page);
 
   await page.waitForTimeout(5000);
 }
 
+// 다이얼로그 내 발행 버튼 찾아 클릭 (top-right 버튼과 구분)
+// Naver는 다이얼로그가 컨테이너 밖 footer에 button을 둘 수 있으므로 robust하게 찾음
+async function clickDialogPublishBtn(page) {
+  const result = await page.evaluate(() => {
+    // 모든 visible 발행 버튼
+    const buttons = Array.from(document.querySelectorAll('button.publish_btn__m9KHH')).filter(b => {
+      const r = b.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+    if (buttons.length === 0) return { error: '발행 버튼 화면에 없음' };
+
+    // 다이얼로그/팝업/설정 패널 안의 버튼 찾기 (부모 체인 walk)
+    let target = null;
+    for (const btn of buttons) {
+      let parent = btn.parentElement;
+      while (parent && parent !== document.body) {
+        const cls = ((parent.className || '') + '').toLowerCase();
+        if (cls.includes('layer_publish') || cls.includes('publish_layer') ||
+            cls.includes('publish_setting') || cls.includes('publish_set') ||
+            cls.includes('popup_publish') || cls.includes('se-popup') ||
+            cls.includes('publish_dialog')) {
+          target = btn;
+          break;
+        }
+        parent = parent.parentElement;
+      }
+      if (target) break;
+    }
+
+    // Fallback 1: 발행 버튼이 2개 이상이면 마지막 (다이얼로그가 나중에 렌더)
+    if (!target && buttons.length > 1) target = buttons[buttons.length - 1];
+    // Fallback 2: 1개뿐이면 그것 (다이얼로그 안이라 가정)
+    if (!target) target = buttons[0];
+
+    target.click();
+    return { clicked: true, totalButtons: buttons.length };
+  });
+  if (result.error) throw new Error('발행 버튼 클릭 실패: ' + result.error);
+  return result;
+}
+
+// 카테고리 설정 (옵션) — 다이얼로그 내 카테고리 드롭다운에서 선택
+async function selectNaverCategory(page, categoryName) {
+  if (!categoryName || !categoryName.trim()) return { skipped: true };
+  const name = categoryName.trim();
+  try {
+    const catBtn = await page.$('button[aria-label="카테고리 목록 버튼"]');
+    if (!catBtn) return { error: '카테고리 드롭다운 버튼 못 찾음' };
+    await catBtn.click();
+    await page.waitForTimeout(800);
+    const result = await page.evaluate((catName) => {
+      const items = Array.from(document.querySelectorAll('button, li, [role="option"], a'));
+      for (const item of items) {
+        const t = item.textContent.trim();
+        if (t === catName) {
+          const r = item.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            item.click();
+            return { clicked: true };
+          }
+        }
+      }
+      return { error: `카테고리 "${catName}" 옵션 못 찾음` };
+    }, name);
+    await page.waitForTimeout(500);
+    return result;
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 // 예약 발행 — scheduledAt: Date 객체 또는 ISO 문자열
 // 네이버 제약: 분은 10분 단위 (00/10/20/30/40/50), 과거 시간 불가
-async function autoFinalizeScheduledPublish(page, scheduledAt) {
+async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '') {
   const target = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
   if (isNaN(target.getTime())) throw new Error('예약 시간 형식 오류: ' + scheduledAt);
 
@@ -358,22 +429,30 @@ async function autoFinalizeScheduledPublish(page, scheduledAt) {
   const topBtn = await page.$('button.publish_btn__m9KHH');
   if (!topBtn) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
   await topBtn.click();
-  await page.waitForSelector('[class*="layer_publish"]', { timeout: 10000 });
+  // 다이얼로그 열림 확인 — 예약 라디오로
+  await page.waitForSelector('input#radio_time2, input[name="radio_time"]', { timeout: 10000 });
   await page.waitForTimeout(1800);
 
-  // 2) "예약" 라디오 라벨 클릭 (radio_time2)
+  // 2) 카테고리 선택 (옵션) — 다이얼로그 열린 직후
+  if (naverCategory) {
+    const catResult = await selectNaverCategory(page, naverCategory);
+    if (catResult.error) console.warn('[카테고리 설정] ' + catResult.error);
+    else if (catResult.clicked) console.log('[카테고리 설정] "' + naverCategory + '" 선택됨');
+  }
+
+  // 3) "예약" 라디오 라벨 클릭 (radio_time2)
   const reserveLabel = await page.$('label[for="radio_time2"]');
   if (!reserveLabel) throw new Error('예약 라디오 라벨을 찾을 수 없습니다.');
   await reserveLabel.click();
   await page.waitForTimeout(1000);
 
-  // 3) 날짜 input 클릭 → jQuery UI datepicker 열림
+  // 4) 날짜 input 클릭 → jQuery UI datepicker 열림
   const dateInput = await page.$('input.input_date__QmA0s');
   if (!dateInput) throw new Error('날짜 input을 찾을 수 없습니다.');
   await dateInput.click();
   await page.waitForTimeout(800);
 
-  // 4) 목표 달까지 next 버튼으로 이동 (최대 24개월)
+  // 5) 목표 달까지 next 버튼으로 이동 (최대 24개월)
   for (let i = 0; i < 24; i++) {
     const current = await page.evaluate(() => {
       const y = document.querySelector('.ui-datepicker-year');
@@ -395,7 +474,7 @@ async function autoFinalizeScheduledPublish(page, scheduledAt) {
     await page.waitForTimeout(400);
   }
 
-  // 5) 목표 날짜 버튼 클릭 (활성화된 td 안의 button만)
+  // 6) 목표 날짜 버튼 클릭
   const dayResult = await page.evaluate((day) => {
     const buttons = Array.from(document.querySelectorAll('.ui-datepicker td:not(.ui-state-disabled) > button.ui-state-default'));
     const btn = buttons.find(b => b.textContent.trim() === String(day));
@@ -406,18 +485,16 @@ async function autoFinalizeScheduledPublish(page, scheduledAt) {
   if (dayResult.error) throw new Error(dayResult.error);
   await page.waitForTimeout(800);
 
-  // 6) 시간 select 변경
+  // 7) 시간 select
   await page.selectOption('select.hour_option__J_heO', String(targetHour).padStart(2, '0'));
   await page.waitForTimeout(400);
 
-  // 7) 분 select 변경 (10분 단위)
+  // 8) 분 select (10분 단위)
   await page.selectOption('select.minute_option__Vb3xB', String(targetMinute).padStart(2, '0'));
   await page.waitForTimeout(400);
 
-  // 8) 다이얼로그 내 "발행" 버튼 클릭 — 예약 모드이므로 자동 예약 등록
-  const finalBtn = await page.$('[class*="layer_publish"] button.publish_btn__m9KHH');
-  if (!finalBtn) throw new Error('다이얼로그 내 발행 버튼을 찾을 수 없습니다.');
-  await finalBtn.click();
+  // 9) 다이얼로그 내 "발행" 버튼 클릭 (robust)
+  await clickDialogPublishBtn(page);
 
   // 예약 등록 완료 대기
   await page.waitForTimeout(5000);
@@ -434,7 +511,7 @@ async function dismissDraftPopup(page) {
   } catch (_) {}
 }
 
-async function publishToNaver({ title, content, hashtags, relatedPosts, config, category = 'other', autoPublish = false, images = [], scheduledAt = null }) {
+async function publishToNaver({ title, content, hashtags, relatedPosts, config, category = 'other', autoPublish = false, images = [], scheduledAt = null, naverCategory = '' }) {
   const naverID = config.naverID || process.env.NAVER_ID;
   const naverPW = config.naverPW || process.env.NAVER_PW;
 
@@ -514,7 +591,7 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
   // ── Step 7: 발행 분기 — 예약 발행 / 즉시 자동 발행 / 수동 (브라우저 열린 채로) ──
   if (scheduledAt) {
     await page.waitForTimeout(1500);
-    await autoFinalizeScheduledPublish(page, scheduledAt);
+    await autoFinalizeScheduledPublish(page, scheduledAt, naverCategory);
   } else if (autoPublish) {
     await page.waitForTimeout(1500);
     await autoFinalizePublish(page);

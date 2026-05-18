@@ -25,8 +25,25 @@ function parseContent(raw, filename = '') {
   }
   if (!title) {
     errors.push('제목을 찾을 수 없습니다 (첫 줄에 제목을 입력하세요).');
-    return { title: '', body: '', hashtags: '', imageMarkerCount: 0, charCount: 0, filename, errors, warnings };
+    return { title: '', body: '', hashtags: '', imageMarkerCount: 0, charCount: 0, naverCategory: '', filename, errors, warnings };
   }
+
+  // 1-bis) 카테고리 — 제목 다음 줄들에서 "카테고리: ..." 찾기 (있으면 사용, 없으면 빈 문자열)
+  let naverCategory = '';
+  let categoryLineIdx = -1;
+  for (let i = titleLineIdx + 1; i < Math.min(lines.length, titleLineIdx + 5); i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const m = line.match(/^카테고리\s*[:：]\s*(.+)$/);
+    if (m) {
+      naverCategory = m[1].trim();
+      categoryLineIdx = i;
+      break;
+    }
+    // 제목 직후 비어있지 않은 줄이 본문 시작이면 카테고리 없음으로 처리
+    break;
+  }
+  const bodyStartIdx = categoryLineIdx !== -1 ? categoryLineIdx + 1 : titleLineIdx + 1;
 
   // 2) 해시태그 — 파일 끝에서부터 # 으로 시작하는 연속 줄
   const hashtagsLines = [];
@@ -43,8 +60,8 @@ function parseContent(raw, filename = '') {
   }
   const hashtags = hashtagsLines.join(' ').trim();
 
-  // 3) 본문 — 제목 다음부터 해시태그 직전까지, 앞뒤 빈 줄 제거
-  const bodyLines = lines.slice(titleLineIdx + 1, bodyEndIdx);
+  // 3) 본문 — 제목(카테고리 줄까지 포함) 다음부터 해시태그 직전까지, 앞뒤 빈 줄 제거
+  const bodyLines = lines.slice(bodyStartIdx, bodyEndIdx);
   while (bodyLines.length && !bodyLines[0].trim()) bodyLines.shift();
   while (bodyLines.length && !bodyLines[bodyLines.length - 1].trim()) bodyLines.pop();
   const body = bodyLines.join('\n').trim();
@@ -65,7 +82,7 @@ function parseContent(raw, filename = '') {
   if (charCount < 500) warnings.push(`본문이 짧습니다 (${charCount}자, 1000자 이상 권장)`);
   if (!hashtags) warnings.push('해시태그가 없습니다 (#로 시작하는 줄을 끝에 추가하세요)');
 
-  return { title, body, hashtags, imageMarkerCount, charCount, filename, errors, warnings };
+  return { title, body, hashtags, imageMarkerCount, charCount, naverCategory, filename, errors, warnings };
 }
 
 function parseFile(filePath) {

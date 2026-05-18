@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   // ── 수동 예약 발행 ──
   manualParseContent: (data) => ipcRenderer.invoke('manual:parse-content', data),
   manualSelectImage: () => ipcRenderer.invoke('manual:select-image'),
+  manualReadImageThumbnail: (imagePath) => ipcRenderer.invoke('manual:read-image-thumbnail', imagePath),
   manualPublishAll: (data) => ipcRenderer.invoke('manual:publish-all', data),
   onManualProgress: (callback) => ipcRenderer.on('manual:progress', (_event, info) => callback(info)),
 });

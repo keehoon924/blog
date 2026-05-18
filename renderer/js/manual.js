@@ -41,10 +41,14 @@ function renderCard(card) {
     ? p.warnings.map(w => `<span class="meta-badge warn">${escapeHtml(w)}</span>`).join('')
     : '';
 
-  // 이미지 슬롯
+  // 이미지 슬롯 (썸네일 포함)
   const slotsHtml = Array.from({ length: p.imageMarkerCount }, (_, idx) => {
-    const filled = card.images[idx];
-    const filename = filled ? filled.split(/[\\/]/).pop() : '';
+    const img = card.images[idx]; // { path, dataUrl, filename } or null
+    const filled = !!img;
+    const thumbHtml = filled && img.dataUrl
+      ? `<img src="${img.dataUrl}" class="img-slot-thumb" alt=""/>`
+      : '';
+    const label = filled ? escapeHtml(img.filename || '') : '+ 클릭해서 추가';
     return `
       <div class="img-slot ${filled ? 'filled' : ''}"
            data-card-id="${card.id}" data-slot-idx="${idx}"
@@ -53,7 +57,8 @@ function renderCard(card) {
            ondragleave="this.classList.remove('dragover');"
            ondrop="handleImageSlotDrop(event, '${card.id}', ${idx})">
         <div class="img-slot-idx">${idx + 1}번 마커</div>
-        <div class="img-slot-name">${filled ? escapeHtml(filename) : '+ 클릭 / 드래그'}</div>
+        ${thumbHtml}
+        <div class="img-slot-name">${label}</div>
       </div>
     `;
   }).join('');
@@ -84,6 +89,13 @@ function renderCard(card) {
       </div>
 
       ${slotsBlock}
+
+      <div class="card-section">
+        <div class="card-section-label">📁 네이버 카테고리 (정확한 이름, 비우면 마지막 사용 카테고리)</div>
+        <input type="text" class="card-cat-input" value="${escapeHtml(card.naverCategory || '')}"
+               placeholder="예: 일상, 맛집, 친구가 건네는 말 (정확한 이름)"
+               oninput="updateCardCategory('${card.id}', this.value)"/>
+      </div>
 
       <div class="card-section">
         <div class="card-section-label">📅 발행 시간 (분은 10분 단위만 가능)</div>
@@ -142,6 +154,7 @@ async function addFileFromText(text, filename) {
     filename,
     parsed: res.data,
     images: new Array(res.data.imageMarkerCount).fill(null),
+    naverCategory: res.data.naverCategory || '', // 파일에서 "카테고리:" 줄 추출
     scheduledDate: def.date,
     scheduledHour: def.hour,
     scheduledMinute: def.minute,
@@ -179,6 +192,22 @@ function updateCardSchedule(id, field, value) {
   else if (field === 'minute') card.scheduledMinute = value;
 }
 
+function updateCardCategory(id, value) {
+  const card = cards.find(c => c.id === id);
+  if (card) card.naverCategory = value;
+}
+
+async function setImageWithThumbnail(card, slotIdx, imagePath) {
+  const filename = imagePath.split(/[\\/]/).pop();
+  const thumb = await api.manualReadImageThumbnail(imagePath);
+  card.images[slotIdx] = {
+    path: imagePath,
+    dataUrl: thumb.success ? thumb.dataUrl : null,
+    filename,
+  };
+  renderAll();
+}
+
 async function handleImageSlotClick(cardId, slotIdx) {
   const res = await api.manualSelectImage();
   if (!res.success) {
@@ -187,11 +216,10 @@ async function handleImageSlotClick(cardId, slotIdx) {
   }
   const card = cards.find(c => c.id === cardId);
   if (!card) return;
-  card.images[slotIdx] = res.path;
-  renderAll();
+  await setImageWithThumbnail(card, slotIdx, res.path);
 }
 
-function handleImageSlotDrop(event, cardId, slotIdx) {
+async function handleImageSlotDrop(event, cardId, slotIdx) {
   event.preventDefault();
   event.target.closest('.img-slot').classList.remove('dragover');
   const file = event.dataTransfer.files[0];
@@ -208,8 +236,7 @@ function handleImageSlotDrop(event, cardId, slotIdx) {
   }
   const card = cards.find(c => c.id === cardId);
   if (!card) return;
-  card.images[slotIdx] = filePath;
-  renderAll();
+  await setImageWithThumbnail(card, slotIdx, filePath);
 }
 
 function clearAll() {
@@ -227,8 +254,8 @@ function validateBeforePublish() {
     const label = c.filename;
     if (c.parsed.errors.length) errors.push(`${label}: ${c.parsed.errors.join(', ')}`);
     if (!c.parsed.title || !c.parsed.title.trim()) errors.push(`${label}: 제목 없음`);
-    // 이미지 슬롯 미채움 체크
-    const missing = c.images.filter(p => !p).length;
+    // 이미지 슬롯 미채움 체크 (객체 또는 null)
+    const missing = c.images.filter(img => !img || !img.path).length;
     if (missing > 0) errors.push(`${label}: 이미지 ${missing}개 누락 (마커 ${c.parsed.imageMarkerCount}개)`);
     // 예약 시간이 과거인지 체크
     const dt = new Date(`${c.scheduledDate}T${c.scheduledHour}:${c.scheduledMinute}:00`);
@@ -265,7 +292,8 @@ async function handlePublishAll() {
     title: c.parsed.title,
     body: c.parsed.body,
     hashtags: c.parsed.hashtags,
-    images: c.images,
+    images: c.images.map(img => img ? img.path : null), // 객체 → 경로 문자열만 전송
+    naverCategory: c.naverCategory || '',
     scheduledAt: new Date(`${c.scheduledDate}T${c.scheduledHour}:${c.scheduledMinute}:00`).toISOString(),
   }));
 

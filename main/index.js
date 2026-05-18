@@ -259,6 +259,21 @@ ipcMain.handle('manual:select-image', async () => {
   }
 });
 
+// 이미지 썸네일 생성 — 파일 → base64 데이터 URL (미리보기용)
+ipcMain.handle('manual:read-image-thumbnail', async (event, imagePath) => {
+  try {
+    if (!imagePath || !fs.existsSync(imagePath)) return { success: false, error: '파일 없음' };
+    const buffer = fs.readFileSync(imagePath);
+    const ext = path.extname(imagePath).slice(1).toLowerCase();
+    const mimeMap = { jpg: 'jpeg', jpeg: 'jpeg', png: 'png', gif: 'gif', bmp: 'bmp', webp: 'webp', heic: 'heic', heif: 'heif' };
+    const mime = mimeMap[ext] || 'jpeg';
+    const dataUrl = `data:image/${mime};base64,${buffer.toString('base64')}`;
+    return { success: true, dataUrl, sizeKB: Math.round(buffer.length / 1024) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('manual:publish-all', async (event, { posts }) => {
   const config = loadConfig();
   const results = [];
@@ -266,7 +281,6 @@ ipcMain.handle('manual:publish-all', async (event, { posts }) => {
     const post = posts[i];
     const label = post.filename || `글 ${i + 1}`;
     try {
-      // 진행 상황 알림
       event.sender.send('manual:progress', { index: i, total: posts.length, label, status: 'publishing' });
       await publishToNaver({
         title: post.title,
@@ -278,6 +292,7 @@ ipcMain.handle('manual:publish-all', async (event, { posts }) => {
         autoPublish: false,
         images: post.images || [],
         scheduledAt: post.scheduledAt,
+        naverCategory: post.naverCategory || '',
       });
       results.push({ filename: label, success: true });
       event.sender.send('manual:progress', { index: i, total: posts.length, label, status: 'done' });
