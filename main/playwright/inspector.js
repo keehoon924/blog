@@ -1,8 +1,19 @@
 /**
- * SE5 DOM Inspector v2
+ * SE5 DOM Inspector v4 — Range API 기반 정확한 검증
+ *
+ * v3의 한계: Shift+ArrowLeft로 selection 안 잡힘 → 색상/서식 적용 검증 실패
+ * v4 해결: TreeWalker로 본문 텍스트 노드 찾아서 Range로 직접 선택
+ *          드롭다운: 클릭 직전/직후 DOM diff로 새 컨테이너만 추출
+ *          색상 적용 후: 본문 element의 computedStyle.color 직접 읽어 검증
+ *
  * 실행: npm run inspect
- * 확인 항목: 정렬 드롭다운 옵션, 인용구 탈출, 구분선 커서, 에디터 프레임 구조
+ * 결과: dom-dump.json
+ *
+ * 안전:
+ *   - 실제 발행 절대 안 함. 발행 다이얼로그 진입 → 전체 덤프 → X로 닫음.
+ *   - 각 STAGE try-catch 격리.
  */
+
 require('dotenv').config();
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -11,8 +22,235 @@ const path = require('path');
 const SESSION_FILE = path.join(process.cwd(), 'naver-session.json');
 const OUTPUT_FILE  = path.join(process.cwd(), 'dom-dump.json');
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+const dump = { timestamp: new Date().toISOString(), version: 'v4' };
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function safeKey(page, key, wait = 200) { try { await page.keyboard.press(key); await sleep(wait); } catch (_) {} }
+async function safeEscapeAll(page) { for (let i = 0; i < 3; i++) await safeKey(page, 'Escape', 150); }
+
+async function stage(name, key, fn) {
+  console.log(`\n[${key}] ${name}`);
+  try {
+    const t0 = Date.now();
+    await fn();
+    console.log(`  ✓ ${key} 완료 (${Date.now() - t0}ms)`);
+  } catch (err) {
+    console.log(`  ✗ ${key} 실패: ${err.message}`);
+    dump[`${key}_error`] = err.message;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 본문 영역 찾기 + 명시적 포커스
+// ────────────────────────────────────────────────────────────────────────────
+async function getBodyInfo(page) {
+  return page.evaluate(() => {
+    const candidates = [
+      '.se-component.se-text [contenteditable]',
+      '.se-component-content [contenteditable]',
+      '.se-content [contenteditable]',
+      '.se-canvas [contenteditable]',
+      'div.se-canvas',
+    ];
+    const found = [];
+    for (const sel of candidates) {
+      document.querySelectorAll(sel).forEach(el => {
+        const r = el.getBoundingClientRect();
+        found.push({
+          sel,
+          tag: el.tagName,
+          cls: (el.getAttribute('class') || '').substring(0, 100),
+          contenteditable: el.getAttribute('contenteditable'),
+          visible: r.width > 0 && r.height > 0,
+          rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+        });
+      });
+    }
+    return found;
+  }).catch(() => []);
+}
+
+// 본문 컴포넌트 중 하나를 클릭해서 포커스 확보
+async function focusBody(page) {
+  const components = await page.$$('.se-component.se-text');
+  for (const c of components) {
+    const visible = await c.isVisible().catch(() => false);
+    if (visible) {
+      await c.click(); await sleep(300);
+      return true;
+    }
+  }
+  return false;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Range API로 본문에서 텍스트 찾아 선택 (v4 핵심)
+// ────────────────────────────────────────────────────────────────────────────
+async function selectTextInBody(page, searchText) {
+  return page.evaluate((needle) => {
+    // 본문 영역 후보들에서 모두 탐색
+    const containers = document.querySelectorAll('.se-component.se-text, .se-component-content, .se-content, .se-canvas');
+    for (const container of containers) {
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      let node;
+      while (node = walker.nextNode()) {
+        const idx = node.textContent.indexOf(needle);
+        if (idx !== -1) {
+          const range = document.createRange();
+          range.setStart(node, idx);
+          range.setEnd(node, idx + needle.length);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return {
+            ok: true,
+            parentTag: node.parentElement.tagName,
+            parentCls: (node.parentElement.getAttribute('class') || '').substring(0, 100),
+            parentHtml: node.parentElement.outerHTML.substring(0, 500),
+            containerCls: (container.getAttribute('class') || '').substring(0, 100),
+            selectedText: sel.toString(),
+          };
+        }
+      }
+    }
+    return { error: 'text "' + needle + '" not found in body' };
+  }, searchText).catch(e => ({ error: e.message }));
+}
+
+// 선택된 텍스트의 부모 element를 찾아 style + html 반환 (적용 결과 확인용)
+async function inspectSelectedElement(page, searchText) {
+  return page.evaluate((needle) => {
+    const containers = document.querySelectorAll('.se-component.se-text, .se-component-content, .se-content');
+    for (const container of containers) {
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      let node;
+      while (node = walker.nextNode()) {
+        if (node.textContent.includes(needle)) {
+          const parent = node.parentElement;
+          const styles = window.getComputedStyle(parent);
+          return {
+            tag: parent.tagName,
+            cls: (parent.getAttribute('class') || '').substring(0, 150),
+            style: parent.getAttribute('style') || '',
+            color: styles.color,
+            backgroundColor: styles.backgroundColor,
+            fontSize: styles.fontSize,
+            fontWeight: styles.fontWeight,
+            fontStyle: styles.fontStyle,
+            fontFamily: styles.fontFamily,
+            textDecoration: styles.textDecoration,
+            html: parent.outerHTML.substring(0, 800),
+          };
+        }
+      }
+    }
+    return { error: 'text not found' };
+  }, searchText).catch(e => ({ error: e.message }));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 드롭다운 정확히 캡처 — 클릭 직전/직후 DOM 비교
+// ────────────────────────────────────────────────────────────────────────────
+async function snapshotDropdowns(page) {
+  return page.evaluate(() => {
+    return Array.from(document.querySelectorAll('[class*="drop-down-container"], [class*="dropdown"], [class*="popup"]'))
+      .filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      })
+      .map(el => ({
+        cls: (el.getAttribute('class') || '').substring(0, 100),
+        dataName: el.getAttribute('data-name') || '',
+        id: el.id || '',
+      }));
+  }).catch(() => []);
+}
+
+async function clickAndCaptureDropdown(page, btnSelector) {
+  await safeEscapeAll(page); // 혹시 열린 드롭다운 정리
+  await sleep(300);
+
+  const before = await snapshotDropdowns(page);
+  const beforeKeys = new Set(before.map(b => b.cls + '|' + b.dataName));
+
+  const el = await page.$(btnSelector);
+  if (!el) return { error: 'button not found: ' + btnSelector };
+  const visible = await el.isVisible().catch(() => false);
+  if (!visible) return { error: 'button not visible' };
+
+  await el.scrollIntoViewIfNeeded();
+  await el.click(); await sleep(600);
+
+  // 직후 드롭다운 중 새로 나타난 것만
+  const newDropdowns = await page.evaluate((beforeArr) => {
+    const beforeSet = new Set(beforeArr.map(b => b.cls + '|' + b.dataName));
+    const all = Array.from(document.querySelectorAll('[class*="drop-down-container"], [class*="dropdown"], [class*="popup"], [class*="property-toolbar"]'));
+    const news = [];
+    for (const el of all) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const key = (el.getAttribute('class') || '').substring(0, 100) + '|' + (el.getAttribute('data-name') || '');
+      if (beforeSet.has(key)) continue;
+      news.push({
+        cls: (el.getAttribute('class') || '').substring(0, 120),
+        dataName: el.getAttribute('data-name') || '',
+        html: el.outerHTML.substring(0, 4000),
+        items: Array.from(el.querySelectorAll('button, [role="option"], li')).map(b => ({
+          tag: b.tagName,
+          cls: (b.getAttribute('class') || '').substring(0, 100),
+          dataValue: b.getAttribute('data-value') || '',
+          dataName: b.getAttribute('data-name') || '',
+          title: b.getAttribute('title') || '',
+          text: b.textContent.trim().substring(0, 40),
+          style: b.getAttribute('style') || '',
+        })),
+      });
+    }
+    return news;
+  }, before).catch(e => ({ error: e.message }));
+
+  return { success: true, before: before.length, newDropdowns };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 색상 적용 전체 시퀀스 (v4 핵심)
+// ────────────────────────────────────────────────────────────────────────────
+async function applyColorSequence(page, searchText, hexColor) {
+  const result = { searchText, hexColor };
+
+  // 1) 텍스트 선택
+  result.selectResult = await selectTextInBody(page, searchText);
+  if (!result.selectResult.ok) return result;
+
+  // 2) 선택 직후 element 상태
+  result.beforeApply = await inspectSelectedElement(page, searchText);
+
+  // 3) font-color 버튼 클릭
+  const fcBtn = await page.$('button[data-name="font-color"]');
+  if (!fcBtn) { result.error = 'font-color button not found'; return result; }
+  await fcBtn.click(); await sleep(500);
+
+  // 4) 색상 팔레트 클릭
+  const colorClicked = await page.evaluate((hex) => {
+    const btn = document.querySelector(`button.se-color-palette[title="${hex}"]`);
+    if (!btn) return { error: 'color not found: ' + hex };
+    btn.click();
+    return { clicked: true };
+  }, hexColor).catch(e => ({ error: e.message }));
+  result.colorClick = colorClicked;
+  await sleep(500);
+
+  // 5) 적용 후 element 상태 — 색이 진짜 적용됐나
+  result.afterApply = await inspectSelectedElement(page, searchText);
+
+  // 6) 닫혀있어야 할 컬러 피커 ESC로 정리
+  await safeEscapeAll(page);
+  return result;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 로그인
+// ────────────────────────────────────────────────────────────────────────────
 async function doLogin(page, id, pw) {
   await page.goto('https://nid.naver.com/nidlogin.login', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#id', { timeout: 15000 });
@@ -22,149 +260,35 @@ async function doLogin(page, id, pw) {
   for (const c of pw) { await page.keyboard.type(c); await sleep(30 + Math.random() * 60); }
   await sleep(600);
   await page.click('.btn_login');
-  console.log('  로그인 중... (2FA 있으면 직접 완료, 최대 2분 대기)');
+  console.log('  로그인 중... (2FA/캡차 있으면 직접 완료, 최대 2분 대기)');
   await page.waitForFunction(() => !window.location.hostname.includes('nid.naver.com'), { timeout: 120000 });
 }
 
-// ── 현재 포커스 경로 ──────────────────────────────────────────────────────
-async function focusPath(page) {
-  return page.evaluate(() => {
-    const el = document.activeElement;
-    if (!el) return 'null';
-    const parts = [];
-    let cur = el;
-    for (let i = 0; i < 6 && cur && cur.tagName !== 'BODY'; i++) {
-      parts.push(`${cur.tagName}[${(cur.getAttribute('class') || '').split(' ').filter(Boolean).slice(0, 3).join('.')}]`);
-      cur = cur.parentElement;
-    }
-    return parts.join(' → ');
-  });
-}
-
-// ── 인용구 안에 있는지 (iframe 포함) ────────────────────────────────────
-async function isInsideQuote(page) {
-  // 1) outer page
-  const outer = await page.evaluate(() => {
-    let el = document.activeElement;
-    while (el) {
-      const c = el.getAttribute('class') || '';
-      if (c.includes('se-quotation') || c.includes('se-quote')) return true;
-      el = el.parentElement;
-    }
-    return false;
-  });
-  if (outer) return true;
-
-  // 2) iframe 내부 확인
-  try {
-    const frames = page.frames();
-    for (const frame of frames) {
-      if (frame === page.mainFrame()) continue;
-      const inner = await frame.evaluate(() => {
-        let el = document.activeElement;
-        while (el) {
-          const c = el.getAttribute('class') || '';
-          if (c.includes('se-quotation') || c.includes('se-quote')) return true;
-          el = el.parentElement;
-        }
-        return false;
-      }).catch(() => false);
-      if (inner) return true;
-    }
-  } catch { /* ignore */ }
-  return false;
-}
-
-// ── 화면에 보이는 모든 버튼 덤프 ────────────────────────────────────────
-async function dumpVisibleButtons(page, label) {
-  const result = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"], [role="option"]'))
-      .filter(b => {
-        const r = b.getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      })
-      .map(b => ({
-        tag: b.tagName,
-        cls: (b.getAttribute('class') || '').substring(0, 120),
-        ariaLabel: b.getAttribute('aria-label') || '',
-        title: b.getAttribute('title') || '',
-        dataType: b.getAttribute('data-type') || '',
-        dataName: b.getAttribute('data-name') || '',
-        dataValue: b.getAttribute('data-value') || '',
-        text: b.textContent.trim().substring(0, 40),
-        role: b.getAttribute('role') || '',
-      }))
-  );
-  return { label, buttons: result };
-}
-
-// ── 특정 data-name 버튼 클릭 ──────────────────────────────────────────
-async function clickByDataName(page, dataName, dataType) {
-  let sel = `button[data-name="${dataName}"]`;
-  if (dataType) sel += `[data-type="${dataType}"]`;
-  try {
-    const el = await page.$(sel);
-    if (el) {
-      await el.scrollIntoViewIfNeeded();
-      await el.click();
-      await sleep(500);
-      return { success: true, selector: sel };
-    }
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-  return { success: false, error: 'element not found: ' + sel };
-}
-
-// ── 에디터 프레임 구조 분석 ───────────────────────────────────────────
-async function analyzeFrames(page) {
-  const frames = page.frames();
-  const result = [];
-  for (const frame of frames) {
-    try {
-      const url = frame.url();
-      const editables = await frame.evaluate(() =>
-        Array.from(document.querySelectorAll('[contenteditable]')).map(el => ({
-          tag: el.tagName,
-          cls: (el.getAttribute('class') || '').substring(0, 80),
-          ce: el.getAttribute('contenteditable'),
-        }))
-      ).catch(() => []);
-      const seClassCount = await frame.evaluate(() => {
-        const s = new Set();
-        document.querySelectorAll('[class]').forEach(el =>
-          (el.getAttribute('class') || '').split(/\s+/).forEach(c => { if (c.startsWith('se-')) s.add(c); })
-        );
-        return s.size;
-      }).catch(() => 0);
-      result.push({ url: url.substring(0, 100), editables, seClassCount });
-    } catch { /* skip */ }
-  }
-  return result;
-}
-
+// ══════════════════════════════════════════════════════════════════════════
+// MAIN
 // ══════════════════════════════════════════════════════════════════════════
 async function main() {
   const naverID = process.env.NAVER_ID;
   const naverPW = process.env.NAVER_PW;
-  if (!naverID || !naverPW) { console.error('❌ .env 파일에 NAVER_ID, NAVER_PW 필요'); process.exit(1); }
+  if (!naverID || !naverPW) {
+    console.error('❌ .env 파일에 NAVER_ID, NAVER_PW 필요'); process.exit(1);
+  }
 
   const browser = await chromium.launch({
-    headless: false, slowMo: 25,
-    args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+    headless: false, slowMo: 25, channel: 'chrome',
+    args: ['--disable-blink-features=AutomationControlled'],
   });
   const ctxOpts = {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    viewport: { width: 1280, height: 900 },
+    viewport: { width: 1366, height: 900 },
     extraHTTPHeaders: { 'Accept-Language': 'ko-KR,ko;q=0.9' },
   };
   if (fs.existsSync(SESSION_FILE)) ctxOpts.storageState = SESSION_FILE;
 
   const context = await browser.newContext(ctxOpts);
-  const page    = await context.newPage();
+  const page = await context.newPage();
   const writeUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${naverID}`;
 
-  // ── 에디터 열기 ────────────────────────────────────────────────────────
   console.log('\n[OPEN] 에디터 열기...');
   await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await sleep(1500);
@@ -173,363 +297,785 @@ async function main() {
     await context.storageState({ path: SESSION_FILE });
     await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
   }
-  console.log('[WAIT] 에디터 로딩 대기 6초...');
-  await sleep(6000);
+  console.log('[WAIT] 에디터 로딩 8초...');
+  await sleep(8000);
 
-  const dump = { timestamp: new Date().toISOString() };
-
-  // ══════════════════════════════════════════════════════════════════════
-  // STAGE A: 프레임 구조 분석
-  // ══════════════════════════════════════════════════════════════════════
-  console.log('\n[A] 프레임 구조 분석...');
-  dump.A_frames = await analyzeFrames(page);
-  dump.A_frames.forEach((f, i) => console.log(`  frame[${i}]: url=${f.url} | se-classes=${f.seClassCount} | editables=${f.editables.length}`));
-
-  // ══════════════════════════════════════════════════════════════════════
-  // STAGE B: 제목 입력 + 본문 이동
-  // ══════════════════════════════════════════════════════════════════════
-  console.log('\n[B] 제목 입력...');
-  const titleSels = [
-    '.se-documentTitle-inputArea', '.se-title-text',
-    '[placeholder*="제목"]', '.se-documentTitle [contenteditable]',
-  ];
-  let titleClicked = false;
-  for (const sel of titleSels) {
-    const el = await page.$(sel);
-    if (el) {
-      await el.click(); await sleep(400);
-      await page.keyboard.press('Control+a'); await sleep(100);
-      await page.keyboard.type('인스펙터 v2 테스트'); await sleep(300);
-      console.log(`  제목 완료: ${sel}`);
-      dump.B_titleSelector = sel;
-      titleClicked = true;
-      break;
-    }
-  }
-  if (!titleClicked) {
-    // iframe 내부 탐색
-    const frames = page.frames();
-    for (const frame of frames) {
-      for (const sel of titleSels) {
-        try {
-          const el = await frame.$(sel);
-          if (el) {
-            await el.click(); await sleep(400);
-            await frame.keyboard.type('인스펙터 v2 테스트 (iframe)');
-            dump.B_titleSelector = `iframe::${sel}`;
-            titleClicked = true;
-            break;
-          }
-        } catch { /* skip */ }
-      }
-      if (titleClicked) break;
-    }
-  }
-  dump.B_titleFound = titleClicked;
-  console.log(`  제목 셀렉터: ${dump.B_titleSelector || 'NOT FOUND'}`);
-
-  // Enter → 본문으로 이동
-  await page.keyboard.press('Enter'); await sleep(600);
-  dump.B_focusAfterEnter = await focusPath(page);
-  console.log(`  Enter 후 포커스: ${dump.B_focusAfterEnter}`);
-
-  // ══════════════════════════════════════════════════════════════════════
-  // STAGE C: 본문 텍스트 입력 후 정렬 드롭다운 테스트
-  // ══════════════════════════════════════════════════════════════════════
-  console.log('\n[C] 본문 입력 + 정렬 드롭다운 테스트...');
-  await page.keyboard.type('정렬 테스트 문장입니다. 이 줄은 가운데 정렬이 되어야 합니다.');
-  await sleep(400);
-
-  // C-1: 정렬 드롭다운 버튼 클릭 전 상태
-  dump.C1_beforeAlignClick = await dumpVisibleButtons(page, '정렬 드롭다운 클릭 전');
-  const alignBtn = await page.$('[data-name="align-drop-down-with-justify"]');
-  console.log(`  정렬 드롭다운 버튼 존재: ${!!alignBtn}`);
-
-  if (alignBtn) {
-    await alignBtn.scrollIntoViewIfNeeded();
-    await alignBtn.click();
-    await sleep(600);
-    console.log('  정렬 드롭다운 클릭 완료');
-
-    // C-2: 드롭다운 열린 후 모든 버튼 덤프
-    dump.C2_afterAlignDropdown = await dumpVisibleButtons(page, '정렬 드롭다운 열린 후');
-
-    // 드롭다운 안 버튼만 필터 (새로 나타난 것들)
-    const dropdownButtons = await page.evaluate(() => {
-      const container = document.querySelector('.se-property-toolbar-drop-down-container, [class*="drop-down-container"]');
-      if (!container) return { found: false, html: '' };
-      return {
-        found: true,
-        html: container.outerHTML.substring(0, 3000),
-        buttons: Array.from(container.querySelectorAll('button, [role="button"], li, [role="option"]')).map(b => ({
-          tag: b.tagName,
-          cls: (b.getAttribute('class') || '').substring(0, 100),
-          dataValue: b.getAttribute('data-value') || '',
-          dataName: b.getAttribute('data-name') || '',
-          dataType: b.getAttribute('data-type') || '',
-          text: b.textContent.trim().substring(0, 30),
-          ariaLabel: b.getAttribute('aria-label') || '',
-        })),
-      };
+  // 임시 저장 글 다이얼로그 닫기 (있으면 '취소')
+  await page.evaluate(() => {
+    document.querySelectorAll('.se-popup-button-cancel, button').forEach(b => {
+      if (b.textContent.trim() === '취소' && b.closest('.se-popup-container')) b.click();
     });
-    dump.C2_dropdownContent = dropdownButtons;
-    console.log('  드롭다운 컨테이너 찾음:', dropdownButtons.found);
-    if (dropdownButtons.found) {
-      console.log('  드롭다운 버튼들:');
-      dropdownButtons.buttons.forEach(b => console.log('   ', JSON.stringify(b)));
-    } else {
-      // 전체 페이지에서 새로 나타난 버튼들을 찾음
-      console.log('  드롭다운 컨테이너 미발견. 전체 visible 버튼 중 정렬 관련:');
-      const allAfter = dump.C2_afterAlignDropdown.buttons.filter(b =>
-        [b.cls, b.dataValue, b.dataName, b.text, b.ariaLabel].join(' ').match(/왼쪽|가운데|오른쪽|left|center|right|justify|align/i)
-      );
-      console.log(JSON.stringify(allAfter, null, 2));
-      dump.C2_alignRelatedButtons = allAfter;
-    }
+  }).catch(() => {});
+  await sleep(1500);
 
-    // C-3: 가운데 정렬 클릭 시도
-    const centerAttempts = [
-      '[data-value="center"]',
-      '[data-name="align-center"]',
-      'button:has-text("가운데")',
-      '[aria-label*="가운데"]',
-      '[title*="가운데"]',
-    ];
-    let centerClicked = false;
-    for (const sel of centerAttempts) {
-      try {
-        const el = await page.$(sel);
-        if (el) {
-          await el.click(); await sleep(400);
-          dump.C3_centerAlignSelector = sel;
-          centerClicked = true;
-          console.log(`  가운데 정렬 클릭: ${sel}`);
-          break;
-        }
-      } catch { /* try next */ }
-    }
-    if (!centerClicked) {
-      console.log('  ❌ 가운데 정렬 버튼 못 찾음. 드롭다운 HTML 확인 필요');
-      dump.C3_centerAlignSelector = 'NOT FOUND';
-      // ESC로 드롭다운 닫기
-      await page.keyboard.press('Escape'); await sleep(300);
-    }
-
-    // C-4: 정렬 후 단락 클래스 확인
-    dump.C4_paragraphClassAfterAlign = await page.evaluate(() => {
-      const paras = Array.from(document.querySelectorAll('[class*="se-text-paragraph"]'));
-      return paras.map(p => ({ cls: (p.getAttribute('class') || '').substring(0, 100) }));
-    });
-    console.log('  정렬 후 단락 클래스:', dump.C4_paragraphClassAfterAlign);
-  } else {
-    dump.C1_alignBtnNotFound = true;
-    console.log('  ❌ 정렬 드롭다운 버튼 없음');
-  }
-
-  // ══════════════════════════════════════════════════════════════════════
-  // STAGE D: 인용구 삽입 + 탈출 테스트
-  // ══════════════════════════════════════════════════════════════════════
-  console.log('\n[D] 인용구 삽입 & 탈출 테스트...');
-  await page.keyboard.press('Enter'); await sleep(300);
-
-  // D-1: 인용구 버튼 클릭 (정확한 셀렉터)
-  const quoteResult = await clickByDataName(page, 'quotation', 'icon-select');
-  dump.D1_quoteClick = quoteResult;
-  console.log(`  인용구 버튼 클릭: ${quoteResult.success ? '✅ ' + quoteResult.selector : '❌ ' + quoteResult.error}`);
-  await sleep(500);
-
-  dump.D1_focusAfterClick = await focusPath(page);
-  dump.D1_insideQuote = await isInsideQuote(page);
-  console.log(`  클릭 후 포커스: ${dump.D1_focusAfterClick}`);
-  console.log(`  인용구 안에 있음: ${dump.D1_insideQuote}`);
-
-  // D-2: 인용구 텍스트 입력
-  await page.keyboard.type('남에게 어떻게 보일까라는 두려움에서 벗어나 자신에게 솔직해지는 것이다.');
-  await sleep(400);
-  dump.D2_insideQuoteAfterType = await isInsideQuote(page);
-  console.log(`  텍스트 입력 후 인용구 안: ${dump.D2_insideQuoteAfterType}`);
-
-  // D-3: 인용구 안에서 Enter (같은 블록 내 줄바꿈인지 새 컴포넌트인지 확인)
-  console.log('  Enter 키 테스트 (인용구 안에서)...');
-  await page.keyboard.press('Enter'); await sleep(500);
-  dump.D3_insideQuoteAfterEnter = await isInsideQuote(page);
-  dump.D3_focusAfterEnter = await focusPath(page);
-  console.log(`  Enter 후 인용구 안: ${dump.D3_insideQuoteAfterEnter} | 포커스: ${dump.D3_focusAfterEnter}`);
-
-  // 출처 입력 (Enter 로 줄 분리 된 경우)
-  await page.keyboard.type('— 미움받을 용기');
-  await sleep(400);
-
-  // D-4: 탈출 방법들 순서대로 테스트
-  console.log('  탈출 시도 A: ArrowDown...');
-  await page.keyboard.press('ArrowDown'); await sleep(500);
-  dump.D4a_afterArrowDown = {
-    insideQuote: await isInsideQuote(page),
-    focus: await focusPath(page),
-  };
-  console.log(`    결과: 인용구 안=${dump.D4a_afterArrowDown.insideQuote} | ${dump.D4a_afterArrowDown.focus}`);
-
-  if (dump.D4a_afterArrowDown.insideQuote) {
-    console.log('  탈출 시도 B: ArrowDown + Enter...');
-    await page.keyboard.press('ArrowDown'); await sleep(300);
-    await page.keyboard.press('Enter'); await sleep(500);
-    dump.D4b_afterArrowDownEnter = {
-      insideQuote: await isInsideQuote(page),
-      focus: await focusPath(page),
-    };
-    console.log(`    결과: 인용구 안=${dump.D4b_afterArrowDownEnter.insideQuote}`);
-
-    if (dump.D4b_afterArrowDownEnter.insideQuote) {
-      console.log('  탈출 시도 C: JS로 인용구 다음 빈 컴포넌트 클릭...');
-      const escaped = await page.evaluate(() => {
-        // se-components-wrap 안의 컴포넌트들
-        const wrap = document.querySelector('.se-components-wrap, .se-canvas, .se-body, .se-content');
-        if (!wrap) return { success: false, reason: 'wrap not found' };
-        const components = Array.from(wrap.querySelectorAll('.se-component'));
-        const quoteComp = components.find(c => (c.getAttribute('class') || '').includes('se-quotation'));
-        if (!quoteComp) return { success: false, reason: 'quotation component not found' };
-        const next = quoteComp.nextElementSibling;
-        if (next) {
-          const editable = next.querySelector('[contenteditable]');
-          if (editable) { editable.click(); editable.focus(); return { success: true, reason: 'clicked next editable' }; }
-          next.click();
-          return { success: true, reason: 'clicked next component' };
-        }
-        // 마지막 컴포넌트면 se-canvas-bottom 클릭
-        const bottom = document.querySelector('.se-canvas-bottom, .se-canvas-bottom-button');
-        if (bottom) { bottom.click(); return { success: true, reason: 'clicked canvas bottom' }; }
-        return { success: false, reason: 'no next component' };
-      });
-      dump.D4c_jsEscape = escaped;
-      await sleep(400);
-      dump.D4c_afterJs = { insideQuote: await isInsideQuote(page), focus: await focusPath(page) };
-      console.log(`    JS 탈출: ${JSON.stringify(escaped)} | 인용구 안: ${dump.D4c_afterJs.insideQuote}`);
-    }
-  } else {
-    console.log('  ✅ ArrowDown으로 탈출 성공!');
-    dump.D4_exitMethod = 'ArrowDown';
-  }
-
-  // D-5: 탈출 후 새 텍스트 입력 가능한지 테스트
-  await page.keyboard.type('인용구 다음 일반 텍스트');
-  await sleep(400);
-  dump.D5_textAfterQuote = { insideQuote: await isInsideQuote(page), focus: await focusPath(page) };
-  console.log(`  인용구 후 텍스트 입력: 인용구 안=${dump.D5_textAfterQuote.insideQuote}`);
-
-  // ══════════════════════════════════════════════════════════════════════
-  // STAGE E: 구분선 삽입 + 커서 위치 확인
-  // ══════════════════════════════════════════════════════════════════════
-  console.log('\n[E] 구분선 삽입 테스트...');
-  await page.keyboard.press('Enter'); await sleep(300);
-
-  const divResult = await clickByDataName(page, 'horizontal-line', 'icon-select');
-  dump.E1_dividerClick = divResult;
-  console.log(`  구분선 클릭: ${divResult.success ? '✅' : '❌ ' + divResult.error}`);
-  await sleep(500);
-
-  dump.E1_focusAfterDivider = await focusPath(page);
-  console.log(`  구분선 후 포커스: ${dump.E1_focusAfterDivider}`);
-
-  // 구분선 후 텍스트 입력 바로 가능한지
-  await page.keyboard.type('구분선 다음 텍스트');
-  await sleep(400);
-  dump.E2_textAfterDivider = await focusPath(page);
-  console.log(`  구분선 후 텍스트 입력 포커스: ${dump.E2_textAfterDivider}`);
-
-  // ══════════════════════════════════════════════════════════════════════
-  // STAGE F: 굵게 + 글자색 동작 확인
-  // ══════════════════════════════════════════════════════════════════════
-  console.log('\n[F] 굵게 + 글자색 테스트...');
-  await page.keyboard.press('Enter'); await sleep(200);
-  await page.keyboard.type('굵게 테스트');
-  await sleep(300);
-
-  // 텍스트 선택 (shift+home)
-  await page.keyboard.press('Shift+Home'); await sleep(200);
-
-  // 굵게 클릭
-  const boldResult = await clickByDataName(page, 'bold', 'toggle');
-  dump.F1_boldClick = boldResult;
-  console.log(`  굵게: ${boldResult.success ? '✅' : '❌'}`);
-  await sleep(300);
-
-  // 글자색 버튼 클릭 → 어떤 UI가 나오는지 확인
-  const fontColorBtn = await page.$('button[data-name="font-color"]');
-  if (fontColorBtn) {
-    dump.F2_fontColorBtnFound = true;
-    // 클릭 전 visible 버튼 수
-    const beforeCount = (await dumpVisibleButtons(page, 'before font-color')).buttons.length;
-    await fontColorBtn.click(); await sleep(600);
-    dump.F2_afterFontColorClick = await dumpVisibleButtons(page, 'after font-color click');
-    const afterCount = dump.F2_afterFontColorClick.buttons.length;
-    console.log(`  글자색 클릭 후 새 버튼 수: +${afterCount - beforeCount}`);
-
-    // 색상 선택지 파악
-    const colorPicker = await page.evaluate(() => {
-      const cp = document.querySelector('.se-property-color-picker-container, [class*="color-picker"]');
-      if (!cp) return { found: false };
-      return {
-        found: true,
-        html: cp.outerHTML.substring(0, 2000),
-        buttons: Array.from(cp.querySelectorAll('button, [role="button"]')).map(b => ({
-          cls: (b.getAttribute('class') || '').substring(0, 80),
-          dataValue: b.getAttribute('data-value') || '',
-          title: b.getAttribute('title') || '',
-          style: b.getAttribute('style') || '',
-        })).slice(0, 20),
-      };
-    });
-    dump.F2_colorPicker = colorPicker;
-    console.log(`  컬러피커 찾음: ${colorPicker.found}`);
-
-    // ESC로 닫기
-    await page.keyboard.press('Escape'); await sleep(300);
-  } else {
-    dump.F2_fontColorBtnFound = false;
-    console.log('  ❌ 글자색 버튼 없음');
-  }
-
-  // ══════════════════════════════════════════════════════════════════════
-  // STAGE G: 전체 에디터 구조 최종 확인
-  // ══════════════════════════════════════════════════════════════════════
-  console.log('\n[G] 에디터 구조 최종 확인...');
-  dump.G_editorContainerCandidates = await page.evaluate(() => {
-    const candidates = [
-      '.se-canvas', '.se-body', '.se-content', '.se-wrap',
-      '.se-components-wrap', '.se-container', '[class*="se-canvas"]',
-    ];
-    const result = {};
-    for (const sel of candidates) {
-      const el = document.querySelector(sel);
-      result[sel] = el ? {
-        tag: el.tagName,
-        cls: (el.getAttribute('class') || '').substring(0, 80),
-        childCount: el.children.length,
-        html: el.innerHTML.substring(0, 500),
-      } : null;
-    }
-    return result;
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE A: 본문 영역 정확히 찾기 (v4 핵심 — Selection 문제 진단)
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('본문 영역 후보 정확히 매핑', 'A', async () => {
+    dump.A_bodyInfo = await getBodyInfo(page);
+    console.log(`  본문 element 후보 ${dump.A_bodyInfo.length}개`);
+    dump.A_bodyInfo.forEach((b, i) => console.log(`    [${i}] ${b.sel} → ${b.tag} visible=${b.visible}`));
   });
 
-  // se-component 구조 확인 (현재 삽입된 컴포넌트들)
-  dump.G_components = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('.se-component')).map(c => ({
-      cls: (c.getAttribute('class') || '').substring(0, 100),
-      childClasses: Array.from(c.children).map(ch => (ch.getAttribute('class') || '').substring(0, 60)),
-    }))
-  );
-  console.log(`  se-component 수: ${dump.G_components.length}`);
-  dump.G_components.forEach((c, i) => console.log(`    [${i}] ${c.cls}`));
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE B: 제목 + 본문 진입 + 본문에 시드 텍스트 입력
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('제목 입력 + 본문에 시드 텍스트 입력', 'B', async () => {
+    const titleEl = await page.$('.se-title-text');
+    if (titleEl) {
+      await titleEl.click(); await sleep(400);
+      await page.keyboard.press('Control+a'); await sleep(100);
+      await page.keyboard.type('v4 인스펙터 테스트', { delay: 40 });
+      dump.B_titleOk = true;
+    }
+    await safeKey(page, 'Enter', 600);
+
+    // 본문에 검증용 텍스트 5개 입력 (각각 unique한 마커)
+    const seeds = ['보볼드테스트', '이이탤릭테스트', '밑밑줄테스트', '취취소선테스트', '색가나다라마'];
+    for (const s of seeds) {
+      await page.keyboard.type(s, { delay: 35 });
+      await page.keyboard.press('Enter');
+      await sleep(250);
+    }
+    await sleep(500);
+    dump.B_seedsInput = seeds;
+
+    // 본문에 실제로 들어갔는지 확인 — Range API로 첫 시드 찾기
+    const verify = await selectTextInBody(page, seeds[0]);
+    dump.B_verifySeed = verify;
+    console.log(`  시드 입력 검증: ${verify.ok ? '✓' : '✗ ' + verify.error}`);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 1: 툴바 전체 버튼 매핑 (이미 v3에서 확인됨, 간단히 재확인)
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('툴바 버튼 매핑 재확인', '1', async () => {
+    dump.S1_allButtons = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('button[data-name]')).map(b => {
+        const r = b.getBoundingClientRect();
+        return {
+          dataName: b.getAttribute('data-name') || '',
+          dataType: b.getAttribute('data-type') || '',
+          dataValue: b.getAttribute('data-value') || '',
+          ariaLabel: b.getAttribute('aria-label') || '',
+          visible: r.width > 0 && r.height > 0,
+        };
+      })
+    ).catch(() => []);
+    console.log(`  툴바 버튼 ${dump.S1_allButtons.length}개`);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 2: 텍스트 서식 — Range API로 정확히 선택 → 적용 → 결과 검증
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('텍스트 서식 (Range API 선택 → 적용 → 검증)', '2', async () => {
+    const tests = [
+      { text: '보볼드테스트',     btn: 'bold',          key: 'S2_bold',          expect: 'fontWeight' },
+      { text: '이이탤릭테스트',   btn: 'italic',        key: 'S2_italic',        expect: 'fontStyle' },
+      { text: '밑밑줄테스트',     btn: 'underline',     key: 'S2_underline',     expect: 'textDecoration' },
+      { text: '취취소선테스트',   btn: 'strikethrough', key: 'S2_strikethrough', expect: 'textDecoration' },
+    ];
+    for (const t of tests) {
+      const sel = await selectTextInBody(page, t.text);
+      if (!sel.ok) { dump[t.key] = { error: 'select failed: ' + sel.error }; continue; }
+      const before = await inspectSelectedElement(page, t.text);
+      const clickRes = await page.evaluate((dn) => {
+        const b = document.querySelector(`button[data-name="${dn}"][data-type="toggle"]`);
+        if (!b) return { error: 'btn not found' };
+        b.click(); return { clicked: true };
+      }, t.btn).catch(e => ({ error: e.message }));
+      await sleep(400);
+      const after = await inspectSelectedElement(page, t.text);
+      dump[t.key] = { selectInfo: sel, before, click: clickRes, after };
+      console.log(`  ${t.btn}: ${after.error ? '✗' : '✓'} before.${t.expect}=${before[t.expect]} after.${t.expect}=${after[t.expect]}`);
+      await safeEscapeAll(page);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 3: 글자색 — Range API로 정확히 선택 → font-color → 색 클릭 → 검증
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('글자색 전체 시퀀스 검증', '3', async () => {
+    // 다양한 색으로 테스트
+    const colorTests = [
+      { hex: '#ff0010', name: '빨강' },
+      { hex: '#0078cb', name: '파랑' },
+      { hex: '#3fcc9c', name: '청록' },
+    ];
+    // 색 적용 검증용 텍스트들 — 한글 입력
+    await focusBody(page);
+    await safeKey(page, 'End', 100);
+    await safeKey(page, 'Enter', 200);
+    for (const ct of colorTests) {
+      await page.keyboard.type(`색${ct.name}샘플`, { delay: 35 });
+      await page.keyboard.press('Enter');
+      await sleep(200);
+    }
+    await sleep(500);
+
+    dump.S3_colorTests = [];
+    for (const ct of colorTests) {
+      const seqResult = await applyColorSequence(page, `색${ct.name}샘플`, ct.hex);
+      dump.S3_colorTests.push(seqResult);
+      const applied = seqResult.afterApply && seqResult.afterApply.color && seqResult.afterApply.color !== seqResult.beforeApply?.color;
+      console.log(`  ${ct.name} (${ct.hex}): ${applied ? '✓ 적용됨' : '✗ 미적용'} → ${seqResult.afterApply?.color || '?'}`);
+    }
+
+    // 컬러 피커 전체 색 덤프
+    const fcBtn = await page.$('button[data-name="font-color"]');
+    if (fcBtn) {
+      await fcBtn.click(); await sleep(500);
+      dump.S3_allColors = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('button.se-color-palette')).map(b => ({
+          title: b.getAttribute('title') || '',
+          style: b.getAttribute('style') || '',
+          cls: (b.getAttribute('class') || '').substring(0, 80),
+        }))
+      ).catch(() => []);
+      console.log(`  전체 색상 ${dump.S3_allColors.length}개`);
+      await safeEscapeAll(page);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 3b: 배경색 (font-color2 또는 background-color)
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('배경색 (형광펜) 전체 시퀀스', '3b', async () => {
+    await focusBody(page);
+    await safeKey(page, 'End', 100);
+    await safeKey(page, 'Enter', 200);
+    await page.keyboard.type('배배경테스트', { delay: 35 });
+    await sleep(400);
+
+    const sel = await selectTextInBody(page, '배배경테스트');
+    dump.S3b_selectInfo = sel;
+    if (!sel.ok) return;
+
+    const bgBtn = await page.$('button[data-name="background-color"]');
+    if (!bgBtn) { dump.S3b_error = 'background-color btn not found'; return; }
+    await bgBtn.click(); await sleep(500);
+
+    dump.S3b_allBgColors = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('button.se-color-palette')).map(b => ({
+        title: b.getAttribute('title') || '',
+        style: b.getAttribute('style') || '',
+      }))
+    ).catch(() => []);
+    console.log(`  배경색 ${dump.S3b_allBgColors.length}개`);
+
+    // 노랑 형광펜 적용 시도
+    const yellowClick = await page.evaluate(() => {
+      const btn = document.querySelector('button.se-color-palette[title="#fff593"]');
+      if (!btn) return { error: 'yellow not found' };
+      btn.click();
+      return { clicked: true };
+    }).catch(e => ({ error: e.message }));
+    dump.S3b_yellowClick = yellowClick;
+    await sleep(500);
+    dump.S3b_afterApply = await inspectSelectedElement(page, '배배경테스트');
+    console.log(`  배경색 적용 결과 backgroundColor: ${dump.S3b_afterApply?.backgroundColor || '?'}`);
+    await safeEscapeAll(page);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 4: 글자 크기 / 폰트 / 줄간격 — clickAndCaptureDropdown 사용
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('글자 크기 / 폰트 / 줄간격 드롭다운 — 정확한 캡처', '4', async () => {
+    // 선택 먼저 (드롭다운이 selection 없으면 비활성)
+    await selectTextInBody(page, '보볼드테스트');
+    await sleep(200);
+
+    dump.S4_fontSize    = await clickAndCaptureDropdown(page, 'button[data-name="font-size"]');
+    await selectTextInBody(page, '보볼드테스트'); await sleep(200);
+    dump.S4_fontFamily  = await clickAndCaptureDropdown(page, 'button[data-name="font-family"]');
+    await selectTextInBody(page, '보볼드테스트'); await sleep(200);
+    dump.S4_lineHeight  = await clickAndCaptureDropdown(page, 'button[data-name="line-height"]');
+
+    const sizeItems = (dump.S4_fontSize.newDropdowns?.[0]?.items || []).length;
+    const fontItems = (dump.S4_fontFamily.newDropdowns?.[0]?.items || []).length;
+    const lineItems = (dump.S4_lineHeight.newDropdowns?.[0]?.items || []).length;
+    console.log(`  크기 옵션 ${sizeItems}개 / 폰트 ${fontItems}개 / 줄간격 ${lineItems}개`);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 5: 정렬 + 글머리 — clickAndCaptureDropdown으로
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('정렬 + 글머리 드롭다운 정확 캡처', '5', async () => {
+    await selectTextInBody(page, '보볼드테스트'); await sleep(200);
+    dump.S5_alignDropdown = await clickAndCaptureDropdown(page, 'button[data-name="align-drop-down-with-justify"]');
+    await selectTextInBody(page, '보볼드테스트'); await sleep(200);
+    dump.S5_listDropdown  = await clickAndCaptureDropdown(page, 'button[data-name="list"]');
+
+    const alignCount = (dump.S5_alignDropdown.newDropdowns?.[0]?.items || []).length;
+    const listCount  = (dump.S5_listDropdown.newDropdowns?.[0]?.items || []).length;
+    console.log(`  정렬 옵션 ${alignCount}개 / 글머리 옵션 ${listCount}개`);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 6: 위첨자 / 아래첨자 (subscript/superscript) — 빠르게 확인
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('위첨자/아래첨자 검증', '6', async () => {
+    const subResult = await page.evaluate(() => {
+      const sub = document.querySelector('button[data-name="subscript"]');
+      const sup = document.querySelector('button[data-name="superscript"]');
+      return {
+        subscript:   sub ? { exists: true, dataType: sub.getAttribute('data-type') } : null,
+        superscript: sup ? { exists: true, dataType: sup.getAttribute('data-type') } : null,
+      };
+    }).catch(() => ({}));
+    dump.S6_subSuper = subResult;
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 7: 발행 다이얼로그 — 정확한 컨테이너 식별 + 카테고리 정확히
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('발행 다이얼로그 — 정확한 캡처', '7', async () => {
+    const publishBtn = await page.$('button.publish_btn__m9KHH');
+    if (!publishBtn) { dump.S7_error = '발행 버튼 못 찾음'; return; }
+    await publishBtn.click();
+    await sleep(2500);
+
+    // 다이얼로그 컨테이너 찾기
+    dump.S7_dialogContainer = await page.evaluate(() => {
+      const candidates = [
+        '[class*="layer_publish"]', '[class*="layer_post"]',
+        '.se-popup-container', '[role="dialog"]',
+        '[class*="publish_layer"]',
+      ];
+      for (const sel of candidates) {
+        const el = document.querySelector(sel);
+        if (el && el.offsetWidth > 0) {
+          return {
+            selector: sel,
+            cls: (el.getAttribute('class') || '').substring(0, 200),
+            childCount: el.children.length,
+          };
+        }
+      }
+      // 발견 못하면 가장 큰 fixed/absolute 컨테이너
+      const all = Array.from(document.querySelectorAll('div')).filter(el => {
+        const s = window.getComputedStyle(el);
+        return (s.position === 'fixed' || s.position === 'absolute') && el.offsetWidth > 500 && el.offsetHeight > 400;
+      });
+      if (all.length > 0) {
+        const el = all[0];
+        return {
+          selector: 'auto-detect',
+          cls: (el.getAttribute('class') || '').substring(0, 200),
+          childCount: el.children.length,
+        };
+      }
+      return null;
+    }).catch(() => null);
+    console.log(`  다이얼로그 컨테이너: ${dump.S7_dialogContainer?.selector || 'NOT FOUND'}`);
+
+    // 다이얼로그 안의 모든 form 요소
+    dump.S7_inputs = await page.evaluate(() => {
+      // 다이얼로그 컨테이너 안에서만 검색
+      const containers = [
+        document.querySelector('[class*="layer_publish"]'),
+        document.querySelector('[class*="publish_layer"]'),
+        document.querySelector('.se-popup-container'),
+      ].filter(Boolean);
+      const root = containers[0] || document;
+      return Array.from(root.querySelectorAll('input, select, textarea, button')).filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }).map(el => ({
+        tag: el.tagName,
+        type: el.type || '',
+        name: el.getAttribute('name') || '',
+        id: el.id || '',
+        cls: (el.getAttribute('class') || '').substring(0, 120),
+        placeholder: el.getAttribute('placeholder') || '',
+        text: el.textContent.trim().substring(0, 40),
+        value: el.value || '',
+        ariaLabel: el.getAttribute('aria-label') || '',
+      }));
+    }).catch(() => []);
+    console.log(`  다이얼로그 입력/버튼: ${dump.S7_inputs.length}개`);
+
+    // 공개 설정 라벨 (open_type 라디오의 라벨 텍스트)
+    dump.S7_openTypeLabels = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('input[name="open_type"]')).map(input => {
+        // label은 input의 형제 또는 부모의 label 또는 for 속성
+        let labelText = '';
+        if (input.id) {
+          const lbl = document.querySelector(`label[for="${input.id}"]`);
+          if (lbl) labelText = lbl.textContent.trim();
+        }
+        if (!labelText) {
+          const lbl = input.closest('label');
+          if (lbl) labelText = lbl.textContent.trim();
+        }
+        if (!labelText) {
+          const sib = input.nextElementSibling;
+          if (sib) labelText = sib.textContent.trim();
+        }
+        return {
+          id: input.id,
+          value: input.value,
+          label: labelText.substring(0, 30),
+        };
+      });
+    }).catch(() => []);
+
+    // 카테고리 — 다이얼로그 안에서 'category' 클래스 가진 버튼/select 찾기
+    dump.S7_categoryUI = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('button, select, [role="combobox"], [role="listbox"]')).filter(el => {
+        const cls = (el.getAttribute('class') || '').toLowerCase();
+        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+        const id = (el.id || '').toLowerCase();
+        const text = el.textContent.trim();
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        return cls.includes('category') || aria.includes('카테고리') || aria.includes('category')
+            || id.includes('category') || text.includes('카테고리');
+      });
+      return all.slice(0, 20).map(el => ({
+        tag: el.tagName,
+        cls: (el.getAttribute('class') || '').substring(0, 150),
+        id: el.id || '',
+        ariaLabel: el.getAttribute('aria-label') || '',
+        text: el.textContent.trim().substring(0, 60),
+      }));
+    }).catch(() => []);
+    console.log(`  카테고리 UI 후보: ${dump.S7_categoryUI.length}개`);
+
+    // 카테고리 드롭다운 클릭해서 옵션 덤프
+    if (dump.S7_categoryUI.length > 0) {
+      const opened = await page.evaluate(() => {
+        const all = Array.from(document.querySelectorAll('button')).filter(el => {
+          const cls = (el.getAttribute('class') || '').toLowerCase();
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && cls.includes('category');
+        });
+        // 첫 카테고리 버튼 클릭
+        if (all[0]) { all[0].click(); return { clicked: all[0].textContent.trim().substring(0, 30) }; }
+        return { error: 'no category btn' };
+      }).catch(e => ({ error: e.message }));
+      dump.S7_categoryClick = opened;
+      await sleep(700);
+
+      dump.S7_categoryOptions = await page.evaluate(() => {
+        const items = Array.from(document.querySelectorAll('li, [role="option"], button')).filter(el => {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return false;
+          const t = el.textContent.trim();
+          // 카테고리 옵션같이 보이는 것만 (짧은 텍스트, 다이얼로그 안)
+          return t.length > 0 && t.length < 30;
+        });
+        return items.slice(0, 100).map(el => ({
+          tag: el.tagName,
+          cls: (el.getAttribute('class') || '').substring(0, 100),
+          text: el.textContent.trim(),
+          dataValue: el.getAttribute('data-value') || '',
+          ariaLabel: el.getAttribute('aria-label') || '',
+        }));
+      }).catch(() => []);
+      console.log(`  카테고리 옵션 ${dump.S7_categoryOptions.length}개`);
+      await safeEscapeAll(page);
+    }
+
+    // 최종 발행 버튼
+    dump.S7_finalPublishBtn = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button')).filter(b => {
+        const t = b.textContent.trim();
+        const r = b.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (t === '발행' || t === '발행하기');
+      });
+      return btns.map(b => ({
+        cls: (b.getAttribute('class') || '').substring(0, 200),
+        text: b.textContent.trim(),
+        ariaLabel: b.getAttribute('aria-label') || '',
+        dataClk: b.getAttribute('data-clk') || '',
+      }));
+    }).catch(() => []);
+    console.log(`  최종 발행 버튼 후보 ${dump.S7_finalPublishBtn.length}개`);
+
+    // X 버튼 / 닫기 버튼 찾기
+    dump.S7_closeBtn = await page.evaluate(() => {
+      const candidates = Array.from(document.querySelectorAll('button')).filter(b => {
+        const cls = (b.getAttribute('class') || '').toLowerCase();
+        const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+        const r = b.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (cls.includes('close') || aria.includes('close') || aria.includes('닫기'));
+      });
+      return candidates.slice(0, 5).map(b => ({
+        cls: (b.getAttribute('class') || '').substring(0, 150),
+        ariaLabel: b.getAttribute('aria-label') || '',
+      }));
+    }).catch(() => []);
+    console.log(`  닫기 버튼 후보 ${dump.S7_closeBtn.length}개`);
+
+    // 다이얼로그 닫기 — X 우선, 안 되면 ESC 여러 번
+    const closeResult = await page.evaluate(() => {
+      const closeBtn = Array.from(document.querySelectorAll('button')).find(b => {
+        const cls = (b.getAttribute('class') || '').toLowerCase();
+        const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+        const r = b.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (cls.includes('close') || aria.includes('close') || aria.includes('닫기'));
+      });
+      if (closeBtn) { closeBtn.click(); return 'close-button'; }
+      return 'not-found';
+    }).catch(() => 'error');
+    dump.S7_closeMethod = closeResult;
+    await sleep(500);
+    await safeKey(page, 'Escape', 300);
+    await safeKey(page, 'Escape', 300);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 8: 예약 발행 다이얼로그 — 날짜/시간/분 selector 완전 매핑
+  // 안전: 절대 발행/예약 확정 안 함. 다이얼로그 열고 → 예약 모드 → 덤프 → X로 닫음.
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('예약 발행 다이얼로그 매핑 (안전 — 실제 예약 안 함)', '8', async () => {
+    // 1) 다이얼로그 다시 열기 (STAGE 7에서 닫혔음)
+    await safeEscapeAll(page);
+    await sleep(800);
+    const publishBtn = await page.$('button.publish_btn__m9KHH');
+    if (!publishBtn) { dump.S8_error = '발행 버튼 못 찾음'; return; }
+    await publishBtn.click();
+    await sleep(2500);
+
+    // 2) 다이얼로그 내 모든 라디오 + 라벨 텍스트 (현재/예약 토글)
+    dump.S8_radios = await page.evaluate(() => {
+      const containers = [
+        document.querySelector('[class*="layer_publish"]'),
+        document.querySelector('[class*="publish_layer"]'),
+        document.querySelector('.se-popup-container'),
+      ].filter(Boolean);
+      const root = containers[0] || document;
+      return Array.from(root.querySelectorAll('input[type="radio"]')).map(input => {
+        let labelText = '';
+        if (input.id) {
+          const lbl = document.querySelector(`label[for="${input.id}"]`);
+          if (lbl) labelText = lbl.textContent.trim();
+        }
+        if (!labelText && input.closest('label')) labelText = input.closest('label').textContent.trim();
+        if (!labelText && input.nextElementSibling) labelText = input.nextElementSibling.textContent.trim();
+        return {
+          id: input.id, name: input.name, value: input.value,
+          checked: input.checked, label: labelText.substring(0, 30),
+        };
+      });
+    }).catch(() => []);
+    console.log(`  다이얼로그 내 라디오 ${dump.S8_radios.length}개`);
+    dump.S8_radios.forEach(r => console.log(`    [${r.name}=${r.value}] "${r.label}" ${r.checked ? '✓' : ''}`));
+
+    // 3) "예약" 옵션 클릭 (3단계 fallback)
+    const reserveClick = await page.evaluate(() => {
+      const containers = [
+        document.querySelector('[class*="layer_publish"]'),
+        document.querySelector('[class*="publish_layer"]'),
+        document.querySelector('.se-popup-container'),
+      ].filter(Boolean);
+      const root = containers[0] || document;
+
+      // 방법 1: 라벨 텍스트 "예약" 정확 매칭
+      const labels = Array.from(root.querySelectorAll('label'));
+      for (const lbl of labels) {
+        const text = lbl.textContent.trim();
+        const r = lbl.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        if (text === '예약' || text === '예약 발행') {
+          lbl.click();
+          return { method: 'label-exact', text, htmlSnippet: lbl.outerHTML.substring(0, 300) };
+        }
+      }
+      // 방법 2: 라디오 value
+      const inputs = Array.from(root.querySelectorAll('input[type="radio"]'));
+      for (const input of inputs) {
+        const v = (input.value || '').toLowerCase();
+        if (v === 'reserve' || v === 'schedule' || v === 'reservation' || v === 'later') {
+          input.click();
+          if (input.id) {
+            const lbl = document.querySelector(`label[for="${input.id}"]`);
+            if (lbl) lbl.click();
+          }
+          return { method: 'radio-value', value: input.value };
+        }
+      }
+      // 방법 3: 라벨 부분 일치
+      for (const lbl of labels) {
+        const text = lbl.textContent.trim();
+        if (text.includes('예약')) {
+          lbl.click();
+          return { method: 'label-partial', text };
+        }
+      }
+      return { error: '예약 옵션 못 찾음' };
+    }).catch(e => ({ error: e.message }));
+    dump.S8_reserveClick = reserveClick;
+    console.log(`  예약 클릭: ${JSON.stringify(reserveClick).substring(0, 200)}`);
+    await sleep(1800);
+
+    // 4) 예약 모드 진입 후 다이얼로그 전체 입력/버튼 덤프
+    dump.S8_afterReserve = await page.evaluate(() => {
+      const containers = [
+        document.querySelector('[class*="layer_publish"]'),
+        document.querySelector('[class*="publish_layer"]'),
+        document.querySelector('.se-popup-container'),
+      ].filter(Boolean);
+      const root = containers[0] || document;
+      return Array.from(root.querySelectorAll('input, select, button, [role="combobox"], [role="button"], [role="listbox"]')).filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }).map(el => ({
+        tag: el.tagName,
+        type: el.type || '',
+        name: el.getAttribute('name') || '',
+        id: el.id || '',
+        cls: (el.getAttribute('class') || '').substring(0, 150),
+        placeholder: el.getAttribute('placeholder') || '',
+        text: el.textContent.trim().substring(0, 60),
+        value: el.value || '',
+        ariaLabel: el.getAttribute('aria-label') || '',
+        dataValue: el.getAttribute('data-value') || '',
+        role: el.getAttribute('role') || '',
+      }));
+    }).catch(() => []);
+    console.log(`  예약 모드 입력/버튼 ${dump.S8_afterReserve.length}개`);
+
+    // 5) 날짜 UI (input[type=date], placeholder/class에 date/calendar/년월일, 또는 YYYY-MM-DD 패턴)
+    dump.S8_dateUI = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('input, button, [role="button"], [class*="date"], [class*="calendar"]')).filter(el => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const cls = (el.getAttribute('class') || '').toLowerCase();
+        const ph = (el.getAttribute('placeholder') || '');
+        const type = (el.getAttribute('type') || '');
+        const aria = (el.getAttribute('aria-label') || '');
+        const text = el.textContent.trim();
+        return type === 'date' ||
+               cls.includes('date') || cls.includes('calendar') ||
+               /년|월|일|YYYY|MM|DD/i.test(ph) ||
+               /날짜|date/i.test(aria) ||
+               /\d{4}[-./]\d{1,2}[-./]\d{1,2}/.test(text);
+      });
+      return all.slice(0, 15).map(el => ({
+        tag: el.tagName, type: el.type || '',
+        cls: (el.getAttribute('class') || '').substring(0, 150),
+        placeholder: el.getAttribute('placeholder') || '',
+        value: el.value || '',
+        text: el.textContent.trim().substring(0, 50),
+        ariaLabel: el.getAttribute('aria-label') || '',
+        html: el.outerHTML.substring(0, 500),
+      }));
+    }).catch(() => []);
+    console.log(`  날짜 UI 후보 ${dump.S8_dateUI.length}개`);
+
+    // 6) 시간/분 UI
+    dump.S8_timeUI = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('select, input, button, [role="combobox"], [class*="hour"], [class*="minute"], [class*="time"]')).filter(el => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const cls = (el.getAttribute('class') || '').toLowerCase();
+        const ph = (el.getAttribute('placeholder') || '');
+        const aria = (el.getAttribute('aria-label') || '');
+        return cls.includes('hour') || cls.includes('minute') || cls.includes('time') ||
+               /시|분|HH|mm/.test(ph) ||
+               /시|분|hour|minute|time/i.test(aria);
+      });
+      return all.slice(0, 30).map(el => ({
+        tag: el.tagName, type: el.type || '',
+        cls: (el.getAttribute('class') || '').substring(0, 150),
+        placeholder: el.getAttribute('placeholder') || '',
+        value: el.value || '',
+        text: el.textContent.trim().substring(0, 50),
+        ariaLabel: el.getAttribute('aria-label') || '',
+        html: el.outerHTML.substring(0, 400),
+      }));
+    }).catch(() => []);
+    console.log(`  시간/분 UI 후보 ${dump.S8_timeUI.length}개`);
+
+    // 7) 다이얼로그 안 native select 옵션 전체 (시간/분이 select일 가능성)
+    dump.S8_selects = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('select')).filter(s => {
+        const r = s.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }).map(s => ({
+        name: s.name || '', id: s.id || '',
+        cls: (s.getAttribute('class') || '').substring(0, 100),
+        ariaLabel: s.getAttribute('aria-label') || '',
+        options: Array.from(s.options).slice(0, 70).map(o => ({
+          value: o.value, text: o.textContent.trim(),
+        })),
+      }));
+    }).catch(() => []);
+    console.log(`  네이티브 select ${dump.S8_selects.length}개`);
+    dump.S8_selects.forEach(s => console.log(`    select[name=${s.name || s.id}] options=${s.options.length}`));
+
+    // 8) 날짜 input/버튼 클릭 → 캘린더 팝업 열기 시도
+    const dateInputClick = await page.evaluate(() => {
+      const candidates = Array.from(document.querySelectorAll('input, button, [role="button"]')).filter(el => {
+        const cls = (el.getAttribute('class') || '').toLowerCase();
+        const type = el.getAttribute('type') || '';
+        const aria = (el.getAttribute('aria-label') || '');
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        return type === 'date' || cls.includes('date') || cls.includes('calendar') || /날짜/.test(aria);
+      });
+      if (candidates.length > 0) {
+        candidates[0].click();
+        return { clicked: true, cls: (candidates[0].getAttribute('class') || '').substring(0, 100) };
+      }
+      return { error: 'no date input' };
+    }).catch(e => ({ error: e.message }));
+    dump.S8_dateClick = dateInputClick;
+    await sleep(1000);
+
+    // 9) 캘린더 팝업 덤프 (날짜 셀 포함)
+    dump.S8_calendar = await page.evaluate(() => {
+      const calendars = Array.from(document.querySelectorAll('[class*="calendar"], [class*="datepicker"], [class*="date-picker"], [role="grid"]')).filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      return calendars.slice(0, 3).map(el => ({
+        cls: (el.getAttribute('class') || '').substring(0, 200),
+        role: el.getAttribute('role') || '',
+        cells: Array.from(el.querySelectorAll('button, td, [role="gridcell"]')).slice(0, 50).map(c => ({
+          tag: c.tagName,
+          cls: (c.getAttribute('class') || '').substring(0, 80),
+          text: c.textContent.trim().substring(0, 10),
+          ariaLabel: c.getAttribute('aria-label') || '',
+          dataValue: c.getAttribute('data-value') || '',
+        })),
+        html: el.outerHTML.substring(0, 2500),
+      }));
+    }).catch(() => []);
+    console.log(`  캘린더 컨테이너 ${dump.S8_calendar.length}개`);
+
+    await safeEscapeAll(page);
+    await sleep(500);
+
+    // 10) 최종 예약 발행 버튼 (텍스트 "예약 발행" 또는 "발행")
+    dump.S8_finalReserveBtn = await page.evaluate(() => {
+      const containers = [
+        document.querySelector('[class*="layer_publish"]'),
+        document.querySelector('[class*="publish_layer"]'),
+        document.querySelector('.se-popup-container'),
+      ].filter(Boolean);
+      const root = containers[0] || document;
+      const btns = Array.from(root.querySelectorAll('button')).filter(b => {
+        const t = b.textContent.trim();
+        const r = b.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (t === '예약 발행' || t === '예약발행' || t === '발행' || t === '예약');
+      });
+      return btns.map(b => ({
+        cls: (b.getAttribute('class') || '').substring(0, 200),
+        text: b.textContent.trim(),
+        ariaLabel: b.getAttribute('aria-label') || '',
+        dataClk: b.getAttribute('data-clk') || '',
+      }));
+    }).catch(() => []);
+    console.log(`  최종 예약 버튼 후보 ${dump.S8_finalReserveBtn.length}개`);
+    dump.S8_finalReserveBtn.forEach(b => console.log(`    "${b.text}"`));
+
+    // 11) 안전 닫기 (예약 발행 절대 클릭 안 함)
+    const closeResult = await page.evaluate(() => {
+      const closeBtn = Array.from(document.querySelectorAll('button')).find(b => {
+        const cls = (b.getAttribute('class') || '').toLowerCase();
+        const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+        const r = b.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (cls.includes('close') || aria.includes('close') || aria.includes('닫기'));
+      });
+      if (closeBtn) { closeBtn.click(); return 'close-button'; }
+      return 'not-found';
+    }).catch(() => 'error');
+    dump.S8_closeMethod = closeResult;
+    await sleep(500);
+    await safeKey(page, 'Escape', 300);
+    await safeKey(page, 'Escape', 300);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 9: 이미지 업로드 — 사진 버튼 + 파일 input 매핑 (이미지 마커 기능 준비)
+  // ═══════════════════════════════════════════════════════════════════════
+  await stage('이미지 업로드 매핑 — 사진 버튼 + filechooser', '9', async () => {
+    await sleep(500);
+    await focusBody(page);
+    await safeKey(page, 'End', 100);
+    await safeKey(page, 'Enter', 200);
+
+    // 1) 툴바 이미지 관련 버튼
+    dump.S9_imageBtns = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('button')).filter(b => {
+        const dn = (b.getAttribute('data-name') || '').toLowerCase();
+        const al = (b.getAttribute('aria-label') || '');
+        const cls = (b.getAttribute('class') || '').toLowerCase();
+        const r = b.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        return dn === 'image' || dn.includes('photo') || dn === 'picture' || dn.includes('image') ||
+               /사진|이미지/.test(al) || cls.includes('image');
+      }).map(b => ({
+        dataName: b.getAttribute('data-name') || '',
+        dataType: b.getAttribute('data-type') || '',
+        ariaLabel: b.getAttribute('aria-label') || '',
+        cls: (b.getAttribute('class') || '').substring(0, 150),
+        text: b.textContent.trim().substring(0, 30),
+      }));
+    }).catch(() => []);
+    console.log(`  이미지 버튼 후보 ${dump.S9_imageBtns.length}개`);
+    dump.S9_imageBtns.forEach(b => console.log(`    [data-name=${b.dataName}] aria="${b.ariaLabel}"`));
+
+    // 2) 페이지의 모든 file input
+    dump.S9_fileInputs = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('input[type="file"]')).map(input => ({
+        id: input.id || '',
+        name: input.name || '',
+        cls: (input.getAttribute('class') || '').substring(0, 100),
+        accept: input.getAttribute('accept') || '',
+        hidden: input.offsetParent === null,
+        multiple: input.multiple,
+      }));
+    }).catch(() => []);
+    console.log(`  file input ${dump.S9_fileInputs.length}개`);
+
+    // 3) 사진 버튼 클릭 → filechooser 이벤트 캡처 (실제 파일 업로드는 X)
+    const photoBtn = await page.$('button[data-name="image"]');
+    if (photoBtn) {
+      const fcPromise = page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null);
+      await photoBtn.click();
+      const fileChooser = await fcPromise;
+      if (fileChooser) {
+        const elementHtml = await fileChooser.element().evaluate(el => el.outerHTML.substring(0, 500)).catch(() => '');
+        dump.S9_fileChooser = {
+          opened: true,
+          isMultiple: fileChooser.isMultiple(),
+          elementHtml,
+        };
+        await fileChooser.setFiles([]).catch(() => {});
+        console.log(`  ✓ 사진 버튼 → file chooser 열림 (multiple=${fileChooser.isMultiple()})`);
+      } else {
+        dump.S9_fileChooser = { opened: false };
+        console.log(`  ✗ file chooser 안 열림`);
+      }
+    } else {
+      dump.S9_photoBtnError = '사진 버튼 (data-name="image") 못 찾음';
+      console.log(`  ✗ 사진 버튼 못 찾음`);
+    }
+    await sleep(500);
+    await safeEscapeAll(page);
+  });
 
   // ── 결과 저장 ──────────────────────────────────────────────────────────
   fs.writeFileSync(OUTPUT_FILE, JSON.stringify(dump, null, 2), 'utf8');
-  console.log('\n══════════════════════════════════════════════');
-  console.log(`✅ v2 분석 완료!  →  ${OUTPUT_FILE}`);
-  console.log('이 파일을 Claude에게 붙여넣거나 공유해주세요.');
-  console.log('══════════════════════════════════════════════\n');
+  const sizeKB = (fs.statSync(OUTPUT_FILE).size / 1024).toFixed(1);
+  console.log('\n══════════════════════════════════════════════════════════════');
+  console.log(`✅ v4 분석 완료!  →  ${OUTPUT_FILE} (${sizeKB} KB)`);
+  console.log('══════════════════════════════════════════════════════════════');
+  console.log('\n브라우저는 3분간 열려있습니다. Ctrl+C로 즉시 종료 가능.');
 
-  await sleep(5 * 60 * 1000);
+  await sleep(3 * 60 * 1000);
   await browser.close();
 }
 
-main().catch(err => { console.error('❌ 오류:', err.message); process.exit(1); });
+main().catch(err => {
+  console.error('❌ 치명적 오류:', err.message);
+  if (Object.keys(dump).length > 1) {
+    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(dump, null, 2), 'utf8');
+    console.log(`  부분 결과 저장됨: ${OUTPUT_FILE}`);
+  }
+  process.exit(1);
+});
