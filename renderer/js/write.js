@@ -1,67 +1,31 @@
-let selectedStyle = 'emotional';
-let selectedImgStyle = 'blog';
 let currentPostId = null;
 let currentHashtags = '';
 let currentImagePath = null;
 
-// 카테고리별 소재 입력 힌트
-const SUBJECT_HINTS = {
-  daily:      '예: 퇴근 후 카페에서 멍 때린 1시간',
-  recipe:     '예: 쉬운 양파장아찌, 10분 계란볶음밥',
-  restaurant: '예: 성수동 베이크플랜트, 이태원 라멘집',
-  economy:    '예: 한국은행 기준금리 인상, 삼성전자 주가',
-  book:       '예: 미움받을 용기 (기시미 이치로)',
-  car:        '예: 현대 아이오닉5 2026 롱레인지',
-  pet:        '예: 강아지 분리불안, 고양이 밥 안 먹는 이유',
-  sports:     '예: 토트넘 vs 첼시, 손흥민 이번 시즌',
-  other:      '예: 혼자 여행하는 법, 스마트폰 배터리 오래 쓰기',
-};
-
-const SUBJECT_PLACEHOLDERS = {
-  daily:      '오늘의 에피소드나 경험을 한 줄로...',
-  recipe:     '요리명을 입력하세요...',
-  restaurant: '지역 + 가게명...',
-  economy:    '정책·지표·종목명...',
-  book:       '책 제목 (저자)...',
-  car:        '차종 + 연식/등급...',
-  pet:        '동물 종류 + 주제...',
-  sports:     '팀·선수·경기명...',
-  other:      '주제를 자유롭게 입력하세요...',
-};
-
-const PERSPECTIVE_HINTS = {
-  daily:      '예: 혼자만의 시간이 필요한 이유 (비우면 AI가 결정)',
-  recipe:     '예: 초보용, 다이어트 버전 (비우면 AI가 결정)',
-  restaurant: '예: 데이트, 혼밥, 시그니처 메뉴 중심 (비우면 AI가 결정)',
-  economy:    '예: 주담대 있는 분들께, 지금 해야 할 것 (비우면 AI가 결정)',
-  book:       '예: 자존감 낮은 분께, 인상 깊은 구절 중심 (비우면 AI가 결정)',
-  car:        '예: 패밀리카 비교, 구입 전 체크리스트 (비우면 AI가 결정)',
-  pet:        '예: 직접 겪은 경험담, 수의사 추천 방법 (비우면 AI가 결정)',
-  sports:     '예: 전술 분석, 이번 시즌 총평 (비우면 AI가 결정)',
-  other:      '원하는 방향이 있으면 입력 (비우면 AI가 알아서)',
+const PROMPT_PLACEHOLDERS = {
+  daily:      '예: 오늘 퇴근 후 혼자 카페에서 보낸 1시간 경험으로 글 써줘. 30대 직장인 공감 가도록, 친근한 말투로.',
+  recipe:     '예: 에어프라이어로 만드는 쉬운 닭가슴살 요리 레시피 써줘. 다이어트하는 사람 대상, 초보자도 따라할 수 있게.',
+  restaurant: '예: 성수동 새로 생긴 브런치 카페 방문 후기 써줘. 데이트 장소로 추천하는 내용으로, 감성적으로.',
+  economy:    '예: 2025년 청년 전세 대출 조건 변경 내용으로 글 써줘. 30대 사회초년생 입장에서 지금 당장 해야 할 것 위주로.',
+  book:       '예: 미움받을 용기 독후감 써줘. 자존감 낮은 사람에게 추천하는 관점으로, 인상 깊은 구절 포함.',
+  car:        '예: 현대 아이오닉5 2026 직접 시승한 솔직한 후기 써줘. 패밀리카로 고민 중인 분들 대상, 장단점 비교.',
+  pet:        '예: 강아지 분리불안 해결한 실제 경험담 써줘. 반려견 처음 키우는 분들에게 도움 되는 내용으로.',
+  sports:     '예: 손흥민 이번 시즌 활약 분석 글 써줘. 팬 시선에서 솔직하게, 전술적 관점도 포함.',
+  other:      '예: 혼자 여행할 때 꼭 알아야 할 것들 써줘. 20~30대 여성 대상, 실용적인 팁 위주로.',
+  comfort_morning: '예: 월요일 아침, 알람 끄고 침대에서 5분 더 누워있는 사람에게 건네는 짧은 위로. 출근길에 읽을 글. (비워두면 AI가 알아서 결정)',
+  comfort_lunch:   '예: 오전 내내 눈치 보면서 버텼던 직장인의 점심 시간. 잠깐의 쉼표를 건네는 공감 에세이. (비워두면 AI가 알아서 결정)',
+  comfort_evening: '예: 퇴근하고 현관문 닫는 순간 힘이 풀리는 사람에게 건네는 깊은 위로. 하루 마무리. (비워두면 AI가 알아서 결정)',
 };
 
 function onCategoryChange() {
   const category = document.getElementById('categorySelect').value;
-  const subjectInput = document.getElementById('subjectInput');
-  const perspectiveInput = document.getElementById('perspectiveInput');
-
-  subjectInput.placeholder = SUBJECT_PLACEHOLDERS[category] || SUBJECT_PLACEHOLDERS.other;
-  document.getElementById('subjectHint').textContent = SUBJECT_HINTS[category] || '';
-  perspectiveInput.placeholder = PERSPECTIVE_HINTS[category] || PERSPECTIVE_HINTS.other;
-  document.getElementById('perspectiveHint').textContent = '';
-}
-
-function selectStyle(btn) {
-  document.querySelectorAll('.style-btn:not([data-imgstyle])').forEach(b => b.classList.remove('selected'));
-  btn.classList.add('selected');
-  selectedStyle = btn.dataset.style;
+  const promptInput = document.getElementById('promptInput');
+  if (promptInput) promptInput.placeholder = PROMPT_PLACEHOLDERS[category] || PROMPT_PLACEHOLDERS.other;
 }
 
 function selectImgStyle(btn) {
   document.querySelectorAll('[data-imgstyle]').forEach(b => b.classList.remove('selected'));
   btn.classList.add('selected');
-  selectedImgStyle = btn.dataset.imgstyle;
 }
 
 function setStatus(msg, loading = false) {
@@ -76,11 +40,10 @@ function showToast(msg, type = 'info') {
   setTimeout(() => { t.className = ''; }, 3000);
 }
 
-function calcSeoScore(subject, title, content) {
-  if (!subject || !title || !content) return 0;
+function calcSeoScore(keyword, title, content) {
+  if (!keyword || !title || !content) return 0;
   let score = 0;
-  // 소재의 핵심 단어(첫 단어 또는 전체)로 SEO 체크
-  const kw = subject.split(/[\s(]/)[0].toLowerCase();
+  const kw = keyword.split(/[\s(]/)[0].toLowerCase();
   const titleLower = title.toLowerCase();
   const contentLower = content.toLowerCase();
 
@@ -96,10 +59,10 @@ function calcSeoScore(subject, title, content) {
 }
 
 function updateSeoScore() {
-  const subject = document.getElementById('subjectInput').value.trim();
+  const keyword = document.getElementById('keywordInput').value.trim();
   const title = document.getElementById('titleInput').value.trim();
   const content = document.getElementById('contentInput').value.trim();
-  const score = calcSeoScore(subject, title, content);
+  const score = calcSeoScore(keyword, title, content);
 
   const el = document.getElementById('seoScore');
   if (!title && !content) { el.className = 'seo-score'; return; }
@@ -117,22 +80,23 @@ function updateSeoScore() {
 }
 
 async function handleGenerate() {
-  const subject = document.getElementById('subjectInput').value.trim();
-  const perspective = document.getElementById('perspectiveInput').value.trim();
+  const keyword = document.getElementById('keywordInput').value.trim();
+  const userPrompt = document.getElementById('promptInput').value.trim();
   const category = document.getElementById('categorySelect').value;
 
-  if (!subject) {
-    showToast('소재를 입력해주세요. (예: 책 제목, 가게명, 요리명 등)', 'error');
-    document.getElementById('subjectInput').focus();
+  if (!keyword) {
+    showToast('SEO 키워드를 입력해주세요. (예: 청년 전세 대출)', 'error');
+    document.getElementById('keywordInput').focus();
     return;
   }
 
-  setStatus('AI가 글을 작성 중입니다...', true);
+  const newsMsg = userPrompt ? ' (최신 뉴스 검색 중...)' : '';
+  setStatus(`AI가 글을 작성 중입니다${newsMsg}`, true);
   document.getElementById('generateBtn').disabled = true;
   document.getElementById('humanizeBtn').disabled = true;
   document.getElementById('publishBtn').disabled = true;
 
-  const res = await api.generatePost({ subject, perspective, style: selectedStyle, category });
+  const res = await api.generatePost({ keyword, userPrompt, style: 'emotional', category });
 
   document.getElementById('generateBtn').disabled = false;
 
@@ -170,14 +134,17 @@ async function handleGenerate() {
 }
 
 async function handleGenerateImage() {
-  const subject = document.getElementById('subjectInput').value.trim();
+  const keyword = document.getElementById('keywordInput').value.trim();
   const category = document.getElementById('categorySelect').value;
-  if (!subject) { showToast('소재를 먼저 입력해주세요.', 'error'); return; }
+  if (!keyword) { showToast('SEO 키워드를 먼저 입력해주세요.', 'error'); return; }
+
+  const imgStyleBtn = document.querySelector('[data-imgstyle].selected');
+  const imgStyle = imgStyleBtn ? imgStyleBtn.dataset.imgstyle : 'blog';
 
   setStatus('AI 이미지 생성 중... (약 10~20초)', true);
   document.getElementById('imgGenBtn').disabled = true;
 
-  const res = await api.generateImage({ subject, category, style: selectedImgStyle });
+  const res = await api.generateImage({ subject: keyword, category, style: imgStyle });
 
   document.getElementById('imgGenBtn').disabled = false;
 
@@ -206,8 +173,8 @@ async function handleHumanize() {
   setStatus('AI 감지 우회 처리 중...', true);
   document.getElementById('humanizeBtn').disabled = true;
 
-  const subject = document.getElementById('subjectInput').value.trim();
-  const res = await api.humanizePost({ title, content, subject });
+  const keyword = document.getElementById('keywordInput').value.trim();
+  const res = await api.humanizePost({ title, content, subject: keyword });
 
   if (!res.success) {
     setStatus('');
@@ -244,13 +211,13 @@ async function handlePublish() {
   setStatus('네이버 에디터를 여는 중...', true);
   document.getElementById('publishBtn').disabled = true;
 
-  const subject = document.getElementById('subjectInput').value.trim();
-  const perspective = document.getElementById('perspectiveInput').value.trim();
+  const keyword = document.getElementById('keywordInput').value.trim();
+  const userPrompt = document.getElementById('promptInput').value.trim();
 
   const saveRes = await api.savePost({
-    subject,
-    perspective,
-    style: selectedStyle,
+    subject: keyword,
+    perspective: userPrompt.slice(0, 100),
+    style: 'emotional',
     category,
     title,
     content,
@@ -299,9 +266,9 @@ async function handleSaveDraft() {
   if (!title && !content) { showToast('저장할 내용이 없습니다.', 'error'); return; }
 
   await api.savePost({
-    subject: document.getElementById('subjectInput').value.trim(),
-    perspective: document.getElementById('perspectiveInput').value.trim(),
-    style: selectedStyle,
+    subject: document.getElementById('keywordInput').value.trim(),
+    perspective: document.getElementById('promptInput').value.trim().slice(0, 100),
+    style: 'emotional',
     category: document.getElementById('categorySelect').value,
     title: title || '제목 없음',
     content,
@@ -313,8 +280,8 @@ async function handleSaveDraft() {
 }
 
 function clearContent() {
-  document.getElementById('subjectInput').value = '';
-  document.getElementById('perspectiveInput').value = '';
+  document.getElementById('keywordInput').value = '';
+  document.getElementById('promptInput').value = '';
   document.getElementById('titleInput').value = '';
   document.getElementById('contentInput').value = '';
   document.getElementById('hashtagArea').textContent = '';
@@ -332,17 +299,14 @@ function clearContent() {
   setStatus('');
 }
 
-// Live SEO score update
 document.getElementById('titleInput')?.addEventListener('input', updateSeoScore);
 document.getElementById('contentInput')?.addEventListener('input', updateSeoScore);
-document.getElementById('subjectInput')?.addEventListener('input', updateSeoScore);
+document.getElementById('keywordInput')?.addEventListener('input', updateSeoScore);
 
-// 초기 placeholder 세팅
 onCategoryChange();
 
-// 대시보드에서 넘어온 키워드 → 소재 칸에 채우기
 const savedKeyword = sessionStorage.getItem('selectedKeyword');
 if (savedKeyword) {
-  document.getElementById('subjectInput').value = savedKeyword;
+  document.getElementById('keywordInput').value = savedKeyword;
   sessionStorage.removeItem('selectedKeyword');
 }

@@ -21,6 +21,9 @@ const CATEGORY_APIS = {
   pet:        ['blog', 'kin'],
   sports:     ['news', 'blog'],
   other:      ['news', 'kin'],
+  comfort_morning: [],
+  comfort_lunch:   [],
+  comfort_evening: [],
 };
 
 async function callNaverApi(endpoint, query, clientId, clientSecret, display = 3) {
