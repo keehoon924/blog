@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config(); // dev용 — 패키징 후엔 config.json에서 로드
@@ -15,6 +15,7 @@ const { loadConfig, saveConfig } = require('./config');
 const { startScheduler, startAutoPublish, stopAutoPublish, runAutoPublish, runPerformanceCheck, getSchedulerStatus } = require('./scheduler');
 const { generateImage } = require('./ai/imageGen');
 const { fetchTrendingKeywords } = require('./keywords/trending');
+const { parseContent: parseManualContent } = require('./manual/fileParser');
 const { shell } = require('electron');
 
 let mainWindow;
@@ -232,4 +233,58 @@ ipcMain.handle('performance:pending-count', () => {
   } catch (err) {
     return { success: false, count: 0 };
   }
+});
+
+// ── 수동 예약 발행 (manual) ───────────────────────────────────────────────
+ipcMain.handle('manual:parse-content', (event, { text, filename }) => {
+  try {
+    const parsed = parseManualContent(text, filename || '');
+    return { success: true, data: parsed };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('manual:select-image', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '이미지 파일 선택',
+      properties: ['openFile'],
+      filters: [{ name: '이미지', extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'heic', 'heif', 'webp'] }],
+    });
+    if (result.canceled || !result.filePaths.length) return { success: false, canceled: true };
+    return { success: true, path: result.filePaths[0] };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('manual:publish-all', async (event, { posts }) => {
+  const config = loadConfig();
+  const results = [];
+  for (let i = 0; i < posts.length; i++) {
+    const post = posts[i];
+    const label = post.filename || `글 ${i + 1}`;
+    try {
+      // 진행 상황 알림
+      event.sender.send('manual:progress', { index: i, total: posts.length, label, status: 'publishing' });
+      await publishToNaver({
+        title: post.title,
+        content: post.body,
+        hashtags: post.hashtags,
+        relatedPosts: [],
+        config,
+        category: 'other',
+        autoPublish: false,
+        images: post.images || [],
+        scheduledAt: post.scheduledAt,
+      });
+      results.push({ filename: label, success: true });
+      event.sender.send('manual:progress', { index: i, total: posts.length, label, status: 'done' });
+    } catch (err) {
+      results.push({ filename: label, success: false, error: err.message });
+      event.sender.send('manual:progress', { index: i, total: posts.length, label, status: 'failed', error: err.message });
+    }
+  }
+  return { success: true, results };
 });

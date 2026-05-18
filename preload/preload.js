@@ -19,4 +19,9 @@ contextBridge.exposeInMainWorld('api', {
   getSchedulerStatus: () => ipcRenderer.invoke('scheduler:get-status'),
   setAutoMode: (enabled) => ipcRenderer.invoke('scheduler:set-auto-mode', enabled),
   runNow: (data) => ipcRenderer.invoke('scheduler:run-now', data),
+  // ── 수동 예약 발행 ──
+  manualParseContent: (data) => ipcRenderer.invoke('manual:parse-content', data),
+  manualSelectImage: () => ipcRenderer.invoke('manual:select-image'),
+  manualPublishAll: (data) => ipcRenderer.invoke('manual:publish-all', data),
+  onManualProgress: (callback) => ipcRenderer.on('manual:progress', (_event, info) => callback(info)),
 });

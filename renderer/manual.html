@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>수동 예약 발행</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .manual-layout { display: flex; flex-direction: column; gap: 18px; height: calc(100vh - 56px - 48px); overflow: hidden; }
+    .drop-zone {
+      border: 2px dashed var(--border); border-radius: 12px;
+      padding: 40px 20px; text-align: center; cursor: pointer;
+      transition: all 0.2s; background: var(--surface);
+      flex-shrink: 0;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--accent); background: rgba(59,130,246,0.06);
+    }
+    .drop-zone-icon { font-size: 36px; margin-bottom: 8px; opacity: 0.6; }
+    .drop-zone-text { font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+    .drop-zone-hint { font-size: 12px; color: var(--muted); opacity: 0.7; }
+
+    .card-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; }
+    .post-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px;
+    }
+    .post-card.has-error { border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.04); }
+    .card-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 12px; padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-filename { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    .card-remove {
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 12px;
+    }
+    .card-remove:hover { color: #ef4444; border-color: #ef4444; }
+
+    .card-title-input {
+      width: 100%; font-size: 15px; font-weight: 600;
+      padding: 8px 10px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--bg); color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .card-section {
+      margin-bottom: 12px;
+    }
+    .card-section-label {
+      font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600;
+    }
+
+    .img-slots { display: flex; flex-wrap: wrap; gap: 8px; }
+    .img-slot {
+      min-width: 120px; min-height: 56px; padding: 8px 12px;
+      border: 1px dashed var(--border); border-radius: 8px;
+      background: transparent; color: var(--muted); font-size: 12px;
+      cursor: pointer; transition: all 0.15s;
+      display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 3px;
+    }
+    .img-slot:hover { border-color: var(--accent); color: var(--accent); }
+    .img-slot.filled { border-style: solid; border-color: #22c55e; color: #22c55e; background: rgba(34,197,94,0.05); }
+    .img-slot.dragover { border-color: var(--accent); background: rgba(59,130,246,0.08); }
+    .img-slot-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .img-slot-idx { font-size: 10px; opacity: 0.6; }
+
+    .schedule-row { display: flex; gap: 8px; align-items: center; }
+    .schedule-row input[type="date"],
+    .schedule-row select {
+      padding: 7px 10px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--bg); color: var(--text);
+      font-size: 13px;
+    }
+
+    .body-preview {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 10px; font-size: 12px;
+      max-height: 100px; overflow-y: auto; color: var(--muted);
+      white-space: pre-wrap; line-height: 1.5;
+    }
+    .body-preview .marker { color: var(--accent); font-weight: 600; }
+
+    .meta-row { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+    .meta-badge { padding: 2px 8px; border-radius: 10px; background: var(--bg); }
+    .meta-badge.warn { background: rgba(251,191,36,0.15); color: #f59e0b; }
+    .meta-badge.error { background: rgba(239,68,68,0.15); color: #ef4444; }
+
+    .hashtag-preview {
+      font-size: 11px; color: var(--accent); margin-top: 4px;
+      padding: 6px 10px; background: rgba(59,130,246,0.06);
+      border-radius: 6px; line-height: 1.6;
+    }
+
+    .footer {
+      padding-top: 14px; border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      flex-shrink: 0;
+    }
+    #progressLog {
+      max-height: 120px; overflow-y: auto;
+      font-size: 11px; color: var(--muted);
+      margin-top: 8px; padding: 8px; background: var(--bg);
+      border-radius: 6px; font-family: monospace;
+    }
+    #progressLog .ok { color: #22c55e; }
+    #progressLog .fail { color: #ef4444; }
+    .empty-state {
+      text-align: center; color: var(--muted); padding: 40px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="nav-brand">📝 블로그 자동화</span>
+    <div class="nav-links">
+      <button onclick="api.navigate('dashboard')">대시보드</button>
+      <button onclick="api.navigate('write')">글쓰기</button>
+      <button class="active">수동 예약</button>
+      <button onclick="api.navigate('history')">발행 이력</button>
+      <button onclick="api.navigate('settings')">설정</button>
+    </div>
+  </nav>
+
+  <main>
+    <div class="manual-layout">
+
+      <!-- Drop Zone -->
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-zone-icon">📥</div>
+        <div class="drop-zone-text">글 파일을 드래그하거나 <a href="#" id="fileBrowseBtn" style="color:var(--accent); text-decoration:underline;">파일 선택</a></div>
+        <div class="drop-zone-hint">.txt / .md 파일, 여러 개 한 번에 가능</div>
+        <input type="file" id="fileInput" accept=".txt,.md" multiple style="display:none;">
+      </div>
+
+      <!-- Card List -->
+      <div class="card-list" id="cardList">
+        <div class="empty-state" id="emptyState">
+          글 파일을 추가하면 여기에 카드가 나타납니다.
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        <div>
+          <button class="btn btn-outline btn-sm" onclick="clearAll()">🗑 전체 초기화</button>
+          <span id="cardCount" style="margin-left:12px; font-size:12px; color:var(--muted);"></span>
+        </div>
+        <button class="btn btn-primary" id="publishAllBtn" onclick="handlePublishAll()" disabled>
+          🚀 전체 예약 등록
+        </button>
+      </div>
+
+      <div id="progressLog" style="display:none;"></div>
+
+    </div>
+  </main>
+
+  <div id="toast"></div>
+  <script src="js/manual.js"></script>
+</body>
+</html>
