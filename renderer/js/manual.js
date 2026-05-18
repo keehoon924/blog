@@ -199,7 +199,14 @@ function updateCardCategory(id, value) {
 
 async function setImageWithThumbnail(card, slotIdx, imagePath) {
   const filename = imagePath.split(/[\\/]/).pop();
+  console.log(`[manual] 이미지 추가: ${filename} → 카드 ${card.id} 슬롯 ${slotIdx}`);
   const thumb = await api.manualReadImageThumbnail(imagePath);
+  if (thumb.success) {
+    console.log(`[manual] 썸네일 OK (${thumb.sizeKB}KB)`);
+  } else {
+    console.error(`[manual] 썸네일 실패:`, thumb.error);
+    showToast(`썸네일 생성 실패 (이미지는 등록됨): ${thumb.error}`, 'error');
+  }
   card.images[slotIdx] = {
     path: imagePath,
     dataUrl: thumb.success ? thumb.dataUrl : null,

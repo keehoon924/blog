@@ -120,28 +120,44 @@ async function applyAlign(page, alignType) {
   return false;
 }
 
-// 이미지 업로드 — 사진 추가 버튼 클릭 → filechooser에 로컬 파일 전달
+// 이미지 업로드 — 사진 추가 버튼 클릭 → filechooser → 업로드 완료 확인
 async function insertImage(page, imagePath) {
-  if (!imagePath) return false;
-  const photoBtn = await page.$('button[data-name="image"]');
-  if (!photoBtn) {
-    console.error('[insertImage] 사진 추가 버튼 못 찾음');
-    return false;
-  }
+  if (!imagePath) throw new Error('이미지 경로 없음');
 
-  const fcPromise = page.waitForEvent('filechooser', { timeout: 6000 }).catch(() => null);
+  const photoBtn = await page.$('button[data-name="image"]');
+  if (!photoBtn) throw new Error('사진 추가 버튼 (data-name="image") 못 찾음');
+
+  // 업로드 전 본문 이미지 개수
+  const beforeCount = await page.evaluate(() =>
+    document.querySelectorAll('.se-component-image img, .se-image-resource img, .se-component-content img').length
+  );
+
+  const fcPromise = page.waitForEvent('filechooser', { timeout: 8000 });
   await photoBtn.click();
-  const fileChooser = await fcPromise;
-  if (!fileChooser) {
-    console.error('[insertImage] file chooser 안 열림');
-    return false;
-  }
+  const fileChooser = await fcPromise.catch(() => null);
+  if (!fileChooser) throw new Error('파일 선택 다이얼로그 안 열림 (사진 버튼 클릭 후)');
 
   await fileChooser.setFiles(imagePath);
-  // 네이버 서버 업로드 대기 (파일 크기에 따라 다름)
-  await page.waitForTimeout(4000);
+  console.log(`[insertImage] 업로드 시작: ${imagePath.split(/[\\/]/).pop()}`);
 
-  // 커서를 이미지 다음 줄로 이동
+  // 업로드 완료 대기 — 이미지 개수 증가까지 (최대 20초)
+  let uploaded = false;
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(1000);
+    const afterCount = await page.evaluate(() =>
+      document.querySelectorAll('.se-component-image img, .se-image-resource img, .se-component-content img').length
+    );
+    if (afterCount > beforeCount) {
+      uploaded = true;
+      console.log(`[insertImage] ✓ 업로드 완료 (${i + 1}초)`);
+      break;
+    }
+  }
+  if (!uploaded) throw new Error(`이미지 업로드 시간 초과 (20초): ${imagePath}`);
+
+  // 커서를 이미지 다음 줄로 (ArrowDown + End)
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(200);
   await page.keyboard.press('End');
   await page.waitForTimeout(300);
   return true;
@@ -340,71 +356,123 @@ async function autoFinalizePublish(page) {
   await page.waitForTimeout(5000);
 }
 
-// 다이얼로그 내 발행 버튼 찾아 클릭 (top-right 버튼과 구분)
-// Naver는 다이얼로그가 컨테이너 밖 footer에 button을 둘 수 있으므로 robust하게 찾음
+// 다이얼로그 내 발행 버튼 클릭 — Playwright의 실제 click() 사용 (React 호환)
 async function clickDialogPublishBtn(page) {
-  const result = await page.evaluate(() => {
-    // 모든 visible 발행 버튼
-    const buttons = Array.from(document.querySelectorAll('button.publish_btn__m9KHH')).filter(b => {
-      const r = b.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    });
-    if (buttons.length === 0) return { error: '발행 버튼 화면에 없음' };
+  // 모든 publish_btn 핸들 가져와서 visible만 필터
+  const allHandles = await page.$$('button.publish_btn__m9KHH');
+  const visibleHandles = [];
+  for (const h of allHandles) {
+    if (await h.isVisible().catch(() => false)) visibleHandles.push(h);
+  }
+  if (visibleHandles.length === 0) throw new Error('발행 버튼이 화면에 없음 (visible 0개)');
 
-    // 다이얼로그/팝업/설정 패널 안의 버튼 찾기 (부모 체인 walk)
-    let target = null;
-    for (const btn of buttons) {
-      let parent = btn.parentElement;
+  // 다이얼로그/팝업 안에 있는 버튼 찾기 (부모 체인 walk)
+  let targetIdx = -1;
+  for (let i = 0; i < visibleHandles.length; i++) {
+    const isInDialog = await visibleHandles[i].evaluate(el => {
+      let parent = el.parentElement;
       while (parent && parent !== document.body) {
         const cls = ((parent.className || '') + '').toLowerCase();
         if (cls.includes('layer_publish') || cls.includes('publish_layer') ||
             cls.includes('publish_setting') || cls.includes('publish_set') ||
             cls.includes('popup_publish') || cls.includes('se-popup') ||
             cls.includes('publish_dialog')) {
-          target = btn;
-          break;
+          return true;
         }
         parent = parent.parentElement;
       }
-      if (target) break;
-    }
+      return false;
+    }).catch(() => false);
+    if (isInDialog) { targetIdx = i; break; }
+  }
+  // Fallback: 다이얼로그 안 버튼 못 찾으면 마지막 visible (다이얼로그가 후순위 렌더)
+  if (targetIdx === -1 && visibleHandles.length > 1) targetIdx = visibleHandles.length - 1;
+  if (targetIdx === -1) targetIdx = 0;
 
-    // Fallback 1: 발행 버튼이 2개 이상이면 마지막 (다이얼로그가 나중에 렌더)
-    if (!target && buttons.length > 1) target = buttons[buttons.length - 1];
-    // Fallback 2: 1개뿐이면 그것 (다이얼로그 안이라 가정)
-    if (!target) target = buttons[0];
+  console.log(`[발행 버튼] 보이는 ${visibleHandles.length}개 중 ${targetIdx + 1}번째 클릭 시도`);
 
-    target.click();
-    return { clicked: true, totalButtons: buttons.length };
+  const target = visibleHandles[targetIdx];
+  await target.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+
+  // Playwright의 실제 마우스 click (DOM .click()이 React 핸들러 안 트리거할 때 있음)
+  await target.click({ delay: 50 });
+  await page.waitForTimeout(2500);
+
+  // 클릭 검증 — 다이얼로그 닫혔는지 / 예약 라디오 사라졌는지
+  const radioStillVisible = await page.evaluate(() => {
+    const r = document.querySelector('input#radio_time2');
+    if (!r) return false;
+    const rect = r.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
   });
-  if (result.error) throw new Error('발행 버튼 클릭 실패: ' + result.error);
-  return result;
+  if (radioStillVisible) {
+    // 한 번 더 시도 (Playwright force click)
+    console.warn('[발행 버튼] 1차 클릭 후 다이얼로그 여전히 열림 — force click 재시도');
+    await target.click({ force: true, delay: 100 });
+    await page.waitForTimeout(2500);
+  }
+  return { clicked: true, idx: targetIdx, total: visibleHandles.length };
 }
 
-// 카테고리 설정 (옵션) — 다이얼로그 내 카테고리 드롭다운에서 선택
+// 카테고리 설정 (옵션) — 다이얼로그 내 카테고리 드롭다운에서 텍스트 매칭으로 선택
 async function selectNaverCategory(page, categoryName) {
   if (!categoryName || !categoryName.trim()) return { skipped: true };
   const name = categoryName.trim();
   try {
     const catBtn = await page.$('button[aria-label="카테고리 목록 버튼"]');
-    if (!catBtn) return { error: '카테고리 드롭다운 버튼 못 찾음' };
+    if (!catBtn) return { error: '카테고리 드롭다운 버튼 못 찾음 (다이얼로그 미오픈?)' };
     await catBtn.click();
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(1200); // 드롭다운 애니메이션 + 렌더
+
+    // visible한 카테고리 옵션 모두 수집 → 3단계 매칭
     const result = await page.evaluate((catName) => {
-      const items = Array.from(document.querySelectorAll('button, li, [role="option"], a'));
-      for (const item of items) {
-        const t = item.textContent.trim();
-        if (t === catName) {
-          const r = item.getBoundingClientRect();
-          if (r.width > 0 && r.height > 0) {
-            item.click();
-            return { clicked: true };
-          }
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      const candidates = Array.from(document.querySelectorAll(
+        'a, button, li, [role="option"], [role="menuitem"], span'
+      )).filter(isVisible);
+
+      const items = candidates.map(el => ({
+        el,
+        text: el.textContent.trim(),
+      })).filter(x => x.text.length > 0 && x.text.length < 60);
+
+      // 1차: 정확 매칭
+      for (const it of items) {
+        if (it.text === catName) {
+          it.el.click();
+          return { method: 'exact', clicked: it.text };
         }
       }
-      return { error: `카테고리 "${catName}" 옵션 못 찾음` };
+      // 2차: 접두/접미 + 공백 (예: "맛집 (5)")
+      for (const it of items) {
+        if (it.text.startsWith(catName + ' ') || it.text.startsWith(catName + '(')) {
+          it.el.click();
+          return { method: 'prefix', clicked: it.text };
+        }
+      }
+      // 3차: contains (작은 차이 허용)
+      for (const it of items) {
+        if (it.text.includes(catName)) {
+          it.el.click();
+          return { method: 'contains', clicked: it.text };
+        }
+      }
+
+      // 못 찾음 — 사용 가능한 카테고리 목록 디버그용 반환
+      const uniqueTexts = [...new Set(items.map(i => i.text))].slice(0, 30);
+      return { error: `"${catName}" 옵션 없음`, available: uniqueTexts };
     }, name);
+
     await page.waitForTimeout(500);
+    if (result.error && result.available) {
+      console.warn(`[카테고리] ${result.error}\n  사용 가능한 옵션: ${result.available.join(', ')}`);
+    } else if (result.clicked) {
+      console.log(`[카테고리] ${result.method} 매칭: "${result.clicked}" 클릭됨`);
+    }
     return result;
   } catch (err) {
     return { error: err.message };
