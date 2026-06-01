@@ -556,8 +556,8 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
   // 9) 다이얼로그 내 "발행" 버튼 클릭 (robust)
   await clickDialogPublishBtn(page);
 
-  // 예약 등록 완료 대기
-  await page.waitForTimeout(5000);
+  // 예약 등록 완료 대기 — 네이버가 페이지를 닫거나 이동시킬 수 있으므로 try-catch
+  try { await page.waitForTimeout(5000); } catch (_) {}
 }
 
 // '작성 중인 글이 있습니다' 팝업이 뜨면 '취소' 클릭 (새 글로 시작)
@@ -572,15 +572,20 @@ async function dismissDraftPopup(page) {
 }
 
 // 네이버 에디터 우측 '도움말' 패널 닫기
-// 클릭 기록 확인: button.se-help-panel-close-button (x:1467, y:31 — 창 최대화 기준)
-// 일반 Playwright click() 사용 (dispatchEvent 아님)
+// page.mouse.click(실제 좌표) 사용 — 실제 사용자 마우스 클릭과 동일하게 동작
 async function dismissHelpPanel(page) {
   try {
     const btn = await page.$('button.se-help-panel-close-button');
-    if (btn) {
+    if (!btn) return;
+    const box = await btn.boundingBox();
+    if (box) {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    } else {
       await btn.click({ force: true });
-      await page.waitForTimeout(1000);
     }
+    // 패널이 사라질 때까지 대기 (최대 3초)
+    await page.waitForSelector('button.se-help-panel-close-button', { state: 'hidden', timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(500);
   } catch (_) {}
 }
 
@@ -699,7 +704,7 @@ async function publishBatch(posts, config, onProgress) {
   const writeUrl = 'https://blog.naver.com/GoBlogWrite.naver';
 
   // 로그인 1번
-  const page = await context.newPage();
+  let page = await context.newPage();
   await doLogin(page, naverID, naverPW);
   await page.waitForTimeout(2000);
   await context.storageState({ path: SESSION_FILE });
@@ -710,6 +715,10 @@ async function publishBatch(posts, config, onProgress) {
     const post = posts[i];
     if (onProgress) onProgress(i, total, post.title, 'start');
     try {
+      // 예약 발행 후 네이버가 페이지를 닫을 수 있음 — 닫혀 있으면 새 페이지 생성
+      if (page.isClosed()) {
+        page = await context.newPage();
+      }
       await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(3000);
 
@@ -762,10 +771,10 @@ async function publishBatch(posts, config, onProgress) {
 
       // 발행
       if (post.scheduledAt) {
-        await page.waitForTimeout(1500);
+        try { await page.waitForTimeout(1500); } catch (_) {}
         await autoFinalizeScheduledPublish(page, post.scheduledAt, post.naverCategory || '');
       } else if (post.autoPublish) {
-        await page.waitForTimeout(1500);
+        try { await page.waitForTimeout(1500); } catch (_) {}
         await autoFinalizePublish(page);
       }
 
