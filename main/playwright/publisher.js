@@ -780,39 +780,40 @@ async function publishBatch(posts, config, onProgress) {
       }
       await page.waitForTimeout(400);
 
-      // [6] 제목 클릭 후 입력 — evaluate 네이티브 click() + focus()
-      for (const ctx of frames) {
+      // [6] 제목 클릭 후 입력 — frame.$().click({ force:true }) : mousedown/up/click 전체 시퀀스 전송
+      let titleEl = null;
+      for (const frame of page.frames()) {
         try {
-          const ok = await ctx.evaluate(() => {
-            const el = document.querySelector('.se-title-text .se-text-paragraph');
-            if (el) { el.click(); el.focus(); return true; }
-            return false;
-          });
-          if (ok) break;
+          titleEl = await frame.$('.se-title-text .se-text-paragraph');
+          if (titleEl) break;
         } catch (_) {}
       }
-      await page.waitForTimeout(400);
-      await page.keyboard.press('Control+a');
-      await page.keyboard.press('Backspace');
-      await page.waitForTimeout(200);
-      for (const char of post.title) {
-        await page.keyboard.type(char);
-        await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
+      if (titleEl) {
+        await titleEl.click({ force: true });
+        await page.waitForTimeout(400);
+        await page.keyboard.press('Control+a');
+        await page.keyboard.press('Backspace');
+        await page.waitForTimeout(200);
+        for (const char of post.title) {
+          await page.keyboard.type(char);
+          await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
+        }
       }
       await page.waitForTimeout(500);
 
-      // [7] 본문 클릭 — evaluate 네이티브 click() + focus()
-      for (const ctx of frames) {
+      // [7] 본문 클릭 — frame.$().click({ force:true })
+      let bodyEl = null;
+      for (const frame of page.frames()) {
         try {
-          const ok = await ctx.evaluate(() => {
-            const paras = Array.from(document.querySelectorAll('.se-text-paragraph'));
-            const body = paras.find(p => !p.closest('.se-title-text'));
-            if (body) { body.click(); body.focus(); return true; }
-            return false;
-          });
-          if (ok) break;
+          const paras = await frame.$$('.se-text-paragraph');
+          for (const p of paras) {
+            const inTitle = await p.evaluate(el => !!el.closest('.se-title-text'));
+            if (!inTitle) { bodyEl = p; break; }
+          }
+          if (bodyEl) break;
         } catch (_) {}
       }
+      if (bodyEl) await bodyEl.click({ force: true });
       await page.waitForTimeout(400);
 
       // 본문 입력
