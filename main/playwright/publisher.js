@@ -316,8 +316,22 @@ async function typeRelatedPosts(page, relatedPosts) {
 }
 
 async function doLogin(page, id, pw) {
-  await page.goto('https://nid.naver.com/nidlogin.login?mode=form&url=https://www.naver.com/', { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#id', { timeout: 10000 });
+  // 블로그 홈으로 먼저 이동 → 초록 NAVER 로그인 버튼 클릭 → 로그인 폼 진입
+  await page.goto('https://section.blog.naver.com/BlogHome.naver', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1500);
+
+  // 초록 로그인 버튼 클릭 (우측 사이드바 NAVER 로그인 버튼)
+  const loginBtn = await page.$('a.btn_login, a[href*="nidlogin"], .btn_naver_login, a.link_login');
+  if (loginBtn) {
+    await loginBtn.click();
+  } else {
+    // 버튼 못 찾으면 직접 로그인 URL로 이동
+    await page.goto('https://nid.naver.com/nidlogin.login?mode=form&url=https://www.naver.com/', { waitUntil: 'domcontentloaded' });
+  }
+
+  // 로그인 폼 대기
+  await page.waitForSelector('#id', { timeout: 15000 });
+  await page.waitForTimeout(500);
 
   await page.click('#id');
   await page.waitForTimeout(300);
@@ -334,9 +348,10 @@ async function doLogin(page, id, pw) {
   await page.waitForTimeout(500);
   await page.click('.btn_login');
 
+  // 보안문자 발생 시 사용자가 직접 해결할 때까지 대기 (최대 3분)
   await page.waitForFunction(
     () => !window.location.hostname.includes('nid.naver.com'),
-    { timeout: 120000 }
+    { timeout: 180000 }
   );
 }
 
