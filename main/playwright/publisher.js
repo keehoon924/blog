@@ -321,21 +321,28 @@ async function doLogin(page, id, pw) {
   await page.waitForSelector('#id', { timeout: 15000 });
   await page.waitForTimeout(500);
 
-  // 기존 자동완성값 완전히 지우고 새로 입력
-  await page.fill('#id', '');
-  await page.click('#id');
+  // 자동완성 우회: JS로 값 강제 주입 후 키 입력
+  await page.evaluate((val) => {
+    const el = document.querySelector('#id');
+    if (!el) return;
+    el.focus();
+    const nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    nativeInput.set.call(el, val);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, id);
   await page.waitForTimeout(300);
-  for (const char of id) {
-    await page.keyboard.type(char);
-    await page.waitForTimeout(30 + Math.floor(Math.random() * 70));
-  }
-  await page.fill('#pw', '');
-  await page.click('#pw');
+
+  await page.evaluate((val) => {
+    const el = document.querySelector('#pw');
+    if (!el) return;
+    el.focus();
+    const nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    nativeInput.set.call(el, val);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, pw);
   await page.waitForTimeout(300);
-  for (const char of pw) {
-    await page.keyboard.type(char);
-    await page.waitForTimeout(30 + Math.floor(Math.random() * 70));
-  }
   await page.waitForTimeout(500);
   await page.click('.btn_login');
 
