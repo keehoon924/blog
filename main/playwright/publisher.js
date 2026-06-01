@@ -688,4 +688,90 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
   }
 }
 
-module.exports = { publishToNaver };
+// 브라우저 1개로 로그인 1번 → 여러 글 연속 발행
+async function publishBatch(posts, config, onProgress) {
+  const naverID = config.naverID || process.env.NAVER_ID;
+  const naverPW = config.naverPW || process.env.NAVER_PW;
+  if (!naverID || !naverPW) throw new Error('네이버 아이디/비밀번호가 설정되지 않았습니다.');
+
+  const browser = await chromium.launch({
+    headless: false,
+    slowMo: 20,
+    channel: 'chrome',
+    args: ['--disable-blink-features=AutomationControlled'],
+  });
+
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    viewport: { width: 1280, height: 900 },
+    extraHTTPHeaders: { 'Accept-Language': 'ko-KR,ko;q=0.9' },
+  });
+
+  const page = await context.newPage();
+  const writeUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${naverID}`;
+
+  // 로그인 1번
+  await doLogin(page, naverID, naverPW);
+  await context.storageState({ path: SESSION_FILE });
+
+  const total = posts.length;
+
+  for (let i = 0; i < total; i++) {
+    const post = posts[i];
+    if (onProgress) onProgress(i, total, post.title, 'start');
+    try {
+      await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(2500);
+
+      await dismissHelpPanel(page);
+      await dismissDraftPopup(page);
+      await page.waitForTimeout(800);
+
+      // 제목
+      const titleEl = await page.$('.se-title-text');
+      if (titleEl) {
+        await titleEl.scrollIntoViewIfNeeded();
+        await titleEl.click();
+        await page.waitForTimeout(500);
+        await page.keyboard.press('Control+a');
+        await page.keyboard.press('Backspace');
+        await page.waitForTimeout(200);
+        for (const char of post.title) {
+          await page.keyboard.type(char);
+          await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
+        }
+      }
+
+      await page.waitForTimeout(800);
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(500);
+      await applyAlign(page, 'center');
+      await page.waitForTimeout(400);
+
+      // 본문
+      await typeContentWithMarkers(page, post.content, post.images || []);
+      await page.keyboard.press('Control+End');
+      await page.waitForTimeout(200);
+
+      // 해시태그
+      await typeHashtags(page, post.hashtags);
+
+      // 발행
+      if (post.scheduledAt) {
+        await page.waitForTimeout(1500);
+        await autoFinalizeScheduledPublish(page, post.scheduledAt, post.naverCategory || '');
+      } else if (post.autoPublish) {
+        await page.waitForTimeout(1500);
+        await autoFinalizePublish(page);
+      }
+
+      if (onProgress) onProgress(i, total, post.title, 'done');
+    } catch (err) {
+      if (onProgress) onProgress(i, total, post.title, 'error', err.message);
+    }
+  }
+
+  await browser.close();
+}
+
+module.exports = { publishToNaver, publishBatch };
