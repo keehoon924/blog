@@ -321,28 +321,25 @@ async function doLogin(page, id, pw) {
   await page.waitForSelector('#id', { timeout: 15000 });
   await page.waitForTimeout(500);
 
-  // 자동완성 우회: JS로 값 강제 주입 후 키 입력
-  await page.evaluate((val) => {
-    const el = document.querySelector('#id');
-    if (!el) return;
-    el.focus();
-    const nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-    nativeInput.set.call(el, val);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  }, id);
-  await page.waitForTimeout(300);
+  // ID 입력 — 자동완성 지우고 한 글자씩 입력
+  await page.click('#id');
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(200);
+  for (const char of id) {
+    await page.keyboard.type(char);
+    await page.waitForTimeout(30 + Math.floor(Math.random() * 70));
+  }
 
-  await page.evaluate((val) => {
-    const el = document.querySelector('#pw');
-    if (!el) return;
-    el.focus();
-    const nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-    nativeInput.set.call(el, val);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  }, pw);
-  await page.waitForTimeout(300);
+  // PW 입력 — 자동완성 지우고 한 글자씩 입력
+  await page.click('#pw');
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(200);
+  for (const char of pw) {
+    await page.keyboard.type(char);
+    await page.waitForTimeout(30 + Math.floor(Math.random() * 70));
+  }
   await page.waitForTimeout(500);
   await page.click('.btn_login');
 
@@ -572,53 +569,22 @@ async function dismissDraftPopup(page) {
 // 닫기 버튼 클릭 시도 → 5초 안에 안 사라지면 CSS 강제 숨김
 async function dismissHelpPanel(page) {
   try {
-    // What's New / 간결해진 에디터 안내 팝업 닫기 (X 버튼)
-    await page.evaluate(() => {
-      const xBtns = [...document.querySelectorAll('button')].filter(b =>
-        b.className.includes('close') || b.getAttribute('aria-label') === '닫기' ||
-        b.textContent.trim() === '×' || b.textContent.trim() === '✕'
-      );
-      xBtns.forEach(b => b.click());
-      // 오버레이 팝업 직접 숨김
-      document.querySelectorAll('[class*="whats_new"], [class*="whatsnew"], [class*="guide_popup"], [class*="help_popup"]')
-        .forEach(el => el.style.setProperty('display', 'none', 'important'));
-    });
-    await page.waitForTimeout(400);
-
-    // 패널이 없으면 건너뜀
-    const hasPanel = await page.evaluate(() => {
-      const el = document.querySelector('.se-help-title, h1.se-help-title, [class*="help_title"]');
-      return el ? el.getBoundingClientRect().height > 0 : false;
-    });
-    if (!hasPanel) return;
-
-    // 클릭 기록으로 확인된 정확한 닫기 버튼 클래스
+    // 도움말 패널 닫기 버튼 직접 클릭 (확인된 셀렉터: button.se-help-panel-close-button)
     const closeBtn = await page.$('button.se-help-panel-close-button');
     if (closeBtn) {
       await closeBtn.click({ force: true });
-    }
-    await page.waitForTimeout(600);
-
-    // 패널 사라질 때까지 최대 5초 대기
-    for (let i = 0; i < 10; i++) {
-      await page.waitForTimeout(500);
-      const still = await page.evaluate(() => {
-        const el = document.querySelector('.se-help-title, h1.se-help-title, [class*="help_title"]');
-        return el ? el.getBoundingClientRect().height > 0 : false;
-      });
-      if (!still) { console.log('[도움말] 패널 닫힘 확인'); return; }
+      await page.waitForTimeout(600);
     }
 
-    // 5초 후에도 남아있으면 CSS 강제 숨김 (se-help-title 부모 컨테이너)
+    // 그래도 남아있으면 CSS 강제 숨김
     await page.evaluate(() => {
-      const title = document.querySelector('.se-help-title, h1.se-help-title, [class*="help_title"]');
-      if (!title) return;
-      let el = title.parentElement;
+      const btn = document.querySelector('button.se-help-panel-close-button');
+      if (!btn) return;
+      let el = btn.parentElement;
       while (el && el !== document.body) {
         const r = el.getBoundingClientRect();
         if (r.width > 200 && r.height > 200) {
           el.style.setProperty('display', 'none', 'important');
-          console.log('[도움말] 강제 숨김:', el.className.slice(0, 60));
           break;
         }
         el = el.parentElement;
@@ -750,13 +716,13 @@ async function publishBatch(posts, config, onProgress) {
 
       await dismissHelpPanel(page);
       await dismissDraftPopup(page);
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(1200);
 
       // 제목
       const titleEl = await page.$('.se-title-text');
       if (titleEl) {
         await titleEl.scrollIntoViewIfNeeded();
-        await titleEl.click();
+        await titleEl.click({ force: true });
         await page.waitForTimeout(500);
         await page.keyboard.press('Control+a');
         await page.keyboard.press('Backspace');
