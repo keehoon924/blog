@@ -712,6 +712,7 @@ async function publishBatch(posts, config, onProgress) {
 
   // 로그인 1번
   await doLogin(page, naverID, naverPW);
+  await page.waitForTimeout(3000); // 세션 정착 대기
   await context.storageState({ path: SESSION_FILE });
 
   const total = posts.length;
@@ -722,6 +723,12 @@ async function publishBatch(posts, config, onProgress) {
     try {
       await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(2500);
+
+      // 글쓰기 페이지가 아니면 (로그인 세션 문제) 한 번 더 시도
+      if (!page.url().includes('PostWriteForm')) {
+        await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.waitForTimeout(2500);
+      }
 
       await dismissHelpPanel(page);
       await dismissDraftPopup(page);
