@@ -436,11 +436,17 @@ async function forceCloseLayerPopup(page) {
 }
 
 // 다이얼로그 내 발행 확인 버튼 클릭 (confirm_btn__WEaBq)
+// page.mouse.click(실제좌표) — 도움말 닫기와 동일한 방식
 async function clickDialogPublishBtn(page) {
-  const found = await findInFrames(page, 'button.confirm_btn__WEaBq');
-  if (!found) throw new Error('발행 확인 버튼(confirm_btn__WEaBq)을 찾을 수 없습니다.');
-  await found.el.click({ force: true });
-  console.log('[발행 버튼] confirm_btn__WEaBq 클릭됨');
+  const found = await waitInFrames(page, 'button.confirm_btn__WEaBq', 8000);
+  const box = await found.el.boundingBox();
+  if (box) {
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    console.log(`[발행 버튼] mouse.click (${Math.round(box.x + box.width/2)}, ${Math.round(box.y + box.height/2)})`);
+  } else {
+    await found.el.click({ force: true });
+    console.log('[발행 버튼] click({force:true}) fallback');
+  }
 
   await page.waitForTimeout(3000);
 
@@ -452,7 +458,11 @@ async function clickDialogPublishBtn(page) {
   if (stillOpen) {
     console.warn('[발행 버튼] 다이얼로그 여전히 열림 — 재시도');
     const found2 = await findInFrames(page, 'button.confirm_btn__WEaBq');
-    if (found2) await found2.el.click({ force: true });
+    if (found2) {
+      const box2 = await found2.el.boundingBox();
+      if (box2) await page.mouse.click(box2.x + box2.width / 2, box2.y + box2.height / 2);
+      else await found2.el.click({ force: true });
+    }
     await page.waitForTimeout(3000);
   }
   return { clicked: true };
