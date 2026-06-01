@@ -1,0 +1,33 @@
+{
+  "name": "naver-blog-auto",
+  "version": "1.0.0",
+  "description": "네이버 블로그 자동화 프로그램",
+  "main": "main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "electron-store": "^8.2.0",
+    "node-cron": "^3.0.3",
+    "openai": "^4.47.1",
+    "playwright": "^1.44.1",
+    "sql.js": "^1.12.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.blog.auto",
+    "productName": "NaverBlogAuto",
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

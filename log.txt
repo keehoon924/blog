@@ -1,0 +1,32 @@
+
+> naver-blog-auto@1.0.0 start
+> electron .
+
+
+[Scheduler] Started.
+[Batch] 로그인 시작...
+[Batch] 로그인 완료. URL: https://section.blog.naver.com/BlogHome.naver
+[Batch] 블로그 홈 이동: https://blog.naver.com/todaycomfort124
+
+[Batch] ===== 글 1/21: 월요일 아침, 이불 속에서 이 글부터 읽고 나오세요 =====
+[글쓰기] 아이콘 클릭 완료
+[글쓰기] 에디터 새 탭: https://blog.naver.com/wordforyou?Redirect=Write&
+[Batch] 에디터 로드 타임아웃 — 계속 진행
+[도움말] 닫기 버튼 없음 — 패널 없는 것으로 판단, 건너뜀
+[제목] .se-title-text 못 찾음
+[폰트크기] 버튼 없음 — 건너뜀
+[정렬] 드롭다운 버튼 없음 — 건너뜀
+[이미지] 마커 1번째이지만 업로드할 이미지 부족 — 건너뜀
+[이미지] 마커 1번째이지만 업로드할 이미지 부족 — 건너뜀
+[이미지] 마커 1번째이지만 업로드할 이미지 부족 — 건너뜀
+[Batch] 글 1 발행 실패: 우상단 발행 버튼을 찾을 수 없습니다.
+
+[Batch] ===== 글 2/21: 오전 내내 참느라 고생했죠, 이제 잠깐 내려놓아도 돼요 =====
+[글쓰기] 아이콘 클릭 완료
+[글쓰기] 에디터 새 탭: https://blog.naver.com/wordforyou?Redirect=Write&
+[Batch] 에디터 로드 타임아웃 — 계속 진행
+[Batch] 글 2 발행 실패: page.bringToFront: Target page, context or browser has been closed
+
+[Batch] ===== 글 3/21: 월요일을 통째로 버텨낸 당신, 이건 누가 뭐래도 대단한 거예요 =====
+
+[Batch] 전체 21개 처리 완료 — 브라우저 닫기

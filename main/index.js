@@ -10,7 +10,7 @@ const { fetchNaverContext } = require('./keywords/naversearch');
 const { humanizePost } = require('./ai/humanizer');
 const { getLearningBoost } = require('./ai/learner');
 const { analyzeKeyword } = require('./keywords/analyzer');
-const { publishToNaver } = require('./playwright/publisher');
+const { publishToNaver, publishBatch } = require('./playwright/publisher');
 const { loadConfig, saveConfig } = require('./config');
 const { startScheduler, startAutoPublish, stopAutoPublish, runAutoPublish, runPerformanceCheck, getSchedulerStatus } = require('./scheduler');
 const { generateImage } = require('./ai/imageGen');
@@ -277,29 +277,81 @@ ipcMain.handle('manual:read-image-thumbnail', async (event, imagePath) => {
 ipcMain.handle('manual:publish-all', async (event, { posts }) => {
   const config = loadConfig();
   const results = [];
-  for (let i = 0; i < posts.length; i++) {
-    const post = posts[i];
-    const label = post.filename || `글 ${i + 1}`;
-    try {
-      event.sender.send('manual:progress', { index: i, total: posts.length, label, status: 'publishing' });
-      await publishToNaver({
-        title: post.title,
-        content: post.body,
-        hashtags: post.hashtags,
-        relatedPosts: [],
-        config,
-        category: 'other',
-        autoPublish: false,
-        images: post.images || [],
-        scheduledAt: post.scheduledAt,
-        naverCategory: post.naverCategory || '',
-      });
-      results.push({ filename: label, success: true });
-      event.sender.send('manual:progress', { index: i, total: posts.length, label, status: 'done' });
-    } catch (err) {
-      results.push({ filename: label, success: false, error: err.message });
-      event.sender.send('manual:progress', { index: i, total: posts.length, label, status: 'failed', error: err.message });
-    }
+
+  const batchPosts = posts.map((post, i) => ({
+    title:        post.title,
+    content:      post.body,        // manual은 body 필드 사용
+    hashtags:     post.hashtags || '',
+    relatedPosts: [],
+    images:       post.images || [],
+    scheduledAt:  post.scheduledAt || null,
+    naverCategory: post.naverCategory || '',
+    autoPublish:  false,
+  }));
+
+  await publishBatch(batchPosts, config, (i, total, title, status, error) => {
+    const label = posts[i]?.filename || `글 ${i + 1}`;
+    if (status === 'start')  event.sender.send('manual:progress', { index: i, total, label, status: 'publishing' });
+    if (status === 'done')   { event.sender.send('manual:progress', { index: i, total, label, status: 'done' }); results.push({ filename: label, success: true }); }
+    if (status === 'error')  { event.sender.send('manual:progress', { index: i, total, label, status: 'failed', error }); results.push({ filename: label, success: false, error }); }
+  });
+
+  return { success: true, results };
+});
+
+// ── 일괄 예약 발행 (bulk) ─────────────────────────────────────────────────────
+const { parsePostFile } = require('./bulk/parser');
+
+// 텍스트 파싱 (renderer에서 파일 읽어서 텍스트로 전달)
+ipcMain.handle('bulk:parse-text', (event, text) => {
+  try {
+    const posts = parsePostFile(text);
+    return { success: true, posts };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
+});
+
+// 전체 예약 등록 실행 — publishBatch로 브라우저 1개에서 연속 발행
+ipcMain.handle('bulk:run-all', async (event, { posts, startIndex = 0 }) => {
+  const config = loadConfig();
+  const results = [];
+
+  // IPC 직렬화로 Date → ISO string이 되므로 date/time 문자열로 재구성
+  const batchPosts = posts.map(post => {
+    const [yr, mo, dy] = (post.date || '2026-01-01').split('-').map(Number);
+    const [hh, mm]     = (post.time || '09:00').split(':').map(Number);
+    return {
+      title:        post.title,
+      content:      post.content,
+      hashtags:     post.tags || '',
+      relatedPosts: [],
+      images:       [],
+      scheduledAt:  new Date(yr, mo - 1, dy, hh, mm, 0),
+      naverCategory: post.category || '',
+      autoPublish:  false,
+    };
+  });
+
+  // 렌더러 webContents가 살아있을 때만 send (창 닫혀 destroyed면 무시)
+  const safeSend = (channel, payload) => {
+    try {
+      if (event.sender && !event.sender.isDestroyed()) event.sender.send(channel, payload);
+    } catch (_) {}
+  };
+
+  try {
+    await publishBatch(batchPosts, config, (i, total, title, status, error) => {
+      const absIdx = startIndex + i;
+      safeSend('bulk:progress', { index: absIdx, status, title, ...(error ? { error } : {}) });
+      if (status === 'done')  results.push({ title, success: true });
+      if (status === 'error') results.push({ title, success: false, error });
+    });
+  } catch (err) {
+    safeSend('bulk:progress', { status: 'error', error: err.message });
+    return { success: false, error: err.message };
+  }
+
+  safeSend('bulk:progress', { status: 'all_done', total: posts.length });
   return { success: true, results };
 });

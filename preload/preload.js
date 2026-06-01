@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('api', {
   manualReadImageThumbnail: (imagePath) => ipcRenderer.invoke('manual:read-image-thumbnail', imagePath),
   manualPublishAll: (data) => ipcRenderer.invoke('manual:publish-all', data),
   onManualProgress: (callback) => ipcRenderer.on('manual:progress', (_event, info) => callback(info)),
+  // ── 일괄 예약 발행 (bulk) ──
+  bulkParseText: (text) => ipcRenderer.invoke('bulk:parse-text', text),
+  bulkRunAll: (data) => ipcRenderer.invoke('bulk:run-all', data),
+  onBulkProgress: (callback) => ipcRenderer.on('bulk:progress', (_event, info) => callback(info)),
   // Electron 31: file.path 대신 webUtils 사용 (contextIsolation 환경에서 드래그 파일 경로)
   getPathForFile: (file) => webUtils.getPathForFile(file),
 });

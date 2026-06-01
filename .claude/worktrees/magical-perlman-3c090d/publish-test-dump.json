@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-05-18T08:10:58.824Z",
+  "helpPanel": {
+    "foundSel": ".se-help-panel button",
+    "forcedHide": "se-help-header se-help-header-dark"
+  },
+  "titleOk": true,
+  "bodyOk": true,
+  "dialogOpened": false,
+  "categoryResult": {
+    "skipped": true
+  },
+  "reserveRadioOk": false,
+  "timeOk": false,
+  "publishBtnClick": {
+    "ok": true,
+    "text": "발행"
+  },
+  "finalUrl": "https://blog.naver.com/PostWriteForm.naver?blogId=leekeehoon0924",
+  "dialogStillOpen": true
+}
