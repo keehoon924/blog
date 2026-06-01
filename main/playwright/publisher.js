@@ -321,12 +321,15 @@ async function doLogin(page, id, pw) {
   await page.waitForSelector('#id', { timeout: 15000 });
   await page.waitForTimeout(500);
 
+  // 기존 자동완성값 완전히 지우고 새로 입력
+  await page.fill('#id', '');
   await page.click('#id');
   await page.waitForTimeout(300);
   for (const char of id) {
     await page.keyboard.type(char);
     await page.waitForTimeout(30 + Math.floor(Math.random() * 70));
   }
+  await page.fill('#pw', '');
   await page.click('#pw');
   await page.waitForTimeout(300);
   for (const char of pw) {
