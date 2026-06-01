@@ -569,29 +569,16 @@ async function dismissDraftPopup(page) {
 // 닫기 버튼 클릭 시도 → 5초 안에 안 사라지면 CSS 강제 숨김
 async function dismissHelpPanel(page) {
   try {
-    // 도움말 패널 닫기 버튼 직접 클릭 (확인된 셀렉터: button.se-help-panel-close-button)
+    // 버튼이 나타날 때까지 최대 5초 대기 후 클릭
+    await page.waitForSelector('button.se-help-panel-close-button', { timeout: 5000 });
     const closeBtn = await page.$('button.se-help-panel-close-button');
     if (closeBtn) {
       await closeBtn.click({ force: true });
-      await page.waitForTimeout(600);
+      await page.waitForTimeout(800);
     }
-
-    // 그래도 남아있으면 CSS 강제 숨김
-    await page.evaluate(() => {
-      const btn = document.querySelector('button.se-help-panel-close-button');
-      if (!btn) return;
-      let el = btn.parentElement;
-      while (el && el !== document.body) {
-        const r = el.getBoundingClientRect();
-        if (r.width > 200 && r.height > 200) {
-          el.style.setProperty('display', 'none', 'important');
-          break;
-        }
-        el = el.parentElement;
-      }
-    });
-    await page.waitForTimeout(300);
-  } catch (_) {}
+  } catch (_) {
+    // 도움말 패널 없으면 그냥 통과
+  }
 }
 
 async function publishToNaver({ title, content, hashtags, relatedPosts, config, category = 'other', autoPublish = false, images = [], scheduledAt = null, naverCategory = '' }) {
@@ -714,16 +701,16 @@ async function publishBatch(posts, config, onProgress) {
       await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(3000);
 
+      // [1] 도움말 닫기 버튼 대기 후 클릭 (클릭기록 순서 그대로)
       await dismissHelpPanel(page);
       await dismissDraftPopup(page);
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(800);
 
-      // 제목
+      // 제목 입력 (에디터 열리면 제목 영역 기본 포커스)
       const titleEl = await page.$('.se-title-text');
       if (titleEl) {
-        await titleEl.scrollIntoViewIfNeeded();
         await titleEl.click({ force: true });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(400);
         await page.keyboard.press('Control+a');
         await page.keyboard.press('Backspace');
         await page.waitForTimeout(200);
@@ -731,12 +718,30 @@ async function publishBatch(posts, config, onProgress) {
           await page.keyboard.type(char);
           await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
         }
+        await page.waitForTimeout(500);
       }
 
-      await page.waitForTimeout(800);
-      await page.keyboard.press('Enter');
+      // [2] 본문 단락 클릭
+      const bodyEl = await page.$('.se-text-paragraph');
+      if (bodyEl) await bodyEl.click({ force: true });
       await page.waitForTimeout(500);
+
+      // [4][5] 폰트 크기 19 설정
+      const fontSizeBtn = await page.$('button.se-font-size-code-toolbar-button');
+      if (fontSizeBtn) {
+        await fontSizeBtn.click({ force: true });
+        await page.waitForTimeout(400);
+        const fs19 = await page.$('button[class*="font-size-code-fs19"]');
+        if (fs19) await fs19.click({ force: true });
+        await page.waitForTimeout(300);
+      }
+
+      // [6][7] 가운데 정렬
       await applyAlign(page, 'center');
+      await page.waitForTimeout(400);
+
+      // [8] 본문 다시 클릭 후 본문 입력
+      if (bodyEl) await bodyEl.click({ force: true });
       await page.waitForTimeout(400);
 
       // 본문
