@@ -562,6 +562,19 @@ async function dismissDraftPopup(page) {
 // 닫기 버튼 클릭 시도 → 5초 안에 안 사라지면 CSS 강제 숨김
 async function dismissHelpPanel(page) {
   try {
+    // What's New / 간결해진 에디터 안내 팝업 닫기 (X 버튼)
+    await page.evaluate(() => {
+      const xBtns = [...document.querySelectorAll('button')].filter(b =>
+        b.className.includes('close') || b.getAttribute('aria-label') === '닫기' ||
+        b.textContent.trim() === '×' || b.textContent.trim() === '✕'
+      );
+      xBtns.forEach(b => b.click());
+      // 오버레이 팝업 직접 숨김
+      document.querySelectorAll('[class*="whats_new"], [class*="whatsnew"], [class*="guide_popup"], [class*="help_popup"]')
+        .forEach(el => el.style.setProperty('display', 'none', 'important'));
+    });
+    await page.waitForTimeout(400);
+
     // 패널이 없으면 건너뜀
     const hasPanel = await page.evaluate(() => {
       const el = document.querySelector('.se-help-title, h1.se-help-title, [class*="help_title"]');
@@ -708,10 +721,10 @@ async function publishBatch(posts, config, onProgress) {
     extraHTTPHeaders: { 'Accept-Language': 'ko-KR,ko;q=0.9' },
   });
 
-  const page = await context.newPage();
   const writeUrl = 'https://blog.naver.com/GoBlogWrite.naver';
 
   // 로그인 1번
+  let page = await context.newPage();
   await doLogin(page, naverID, naverPW);
   await page.waitForTimeout(2000);
   await context.storageState({ path: SESSION_FILE });
@@ -722,6 +735,8 @@ async function publishBatch(posts, config, onProgress) {
     const post = posts[i];
     if (onProgress) onProgress(i, total, post.title, 'start');
     try {
+      // 페이지가 닫혔으면 새로 열기 (예약 완료 후 네이버가 창 닫는 경우 대응)
+      if (page.isClosed()) page = await context.newPage();
       await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(3000);
 
