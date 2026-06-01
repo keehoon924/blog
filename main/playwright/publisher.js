@@ -316,7 +316,7 @@ async function typeRelatedPosts(page, relatedPosts) {
 }
 
 async function doLogin(page, id, pw) {
-  await page.goto('https://nid.naver.com/nidlogin.login', { waitUntil: 'domcontentloaded' });
+  await page.goto('https://nid.naver.com/nidlogin.login?mode=form&url=https://www.naver.com/', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#id', { timeout: 10000 });
 
   await page.click('#id');
@@ -620,20 +620,15 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
     viewport: { width: 1280, height: 900 },
     extraHTTPHeaders: { 'Accept-Language': 'ko-KR,ko;q=0.9' },
   };
-  if (fs.existsSync(SESSION_FILE)) contextOptions.storageState = SESSION_FILE;
 
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   const writeUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${naverID}`;
 
+  // 항상 로그인 페이지부터 시작 — 보안문자가 뜨면 사용자가 직접 해결 후 자동 진행
+  await doLogin(page, naverID, naverPW);
+  await context.storageState({ path: SESSION_FILE });
   await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForTimeout(1500);
-
-  if (page.url().includes('nid.naver.com')) {
-    await doLogin(page, naverID, naverPW);
-    await context.storageState({ path: SESSION_FILE });
-    await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  }
 
   await page.waitForTimeout(2500);
 
