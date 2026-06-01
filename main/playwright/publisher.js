@@ -316,15 +316,8 @@ async function typeRelatedPosts(page, relatedPosts) {
 }
 
 async function doLogin(page, id, pw) {
-  // 블로그 홈으로 먼저 이동 → 초록 NAVER 로그인 버튼 클릭 → 로그인 폼 진입
-  await page.goto('https://section.blog.naver.com/BlogHome.naver', { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(1500);
-
-  // 초록 NAVER 로그인 버튼 클릭
-  await page.waitForSelector('a.login_button', { timeout: 10000 });
-  await page.click('a.login_button');
-
-  // 로그인 폼 대기
+  // 로그인 페이지로 직접 이동
+  await page.goto('https://nid.naver.com/nidlogin.login?mode=form&url=https%3A%2F%2Fwww.naver.com%2F', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#id', { timeout: 15000 });
   await page.waitForTimeout(500);
 
