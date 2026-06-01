@@ -724,7 +724,7 @@ async function publishBatch(posts, config, onProgress) {
   const writeUrl = 'https://blog.naver.com/GoBlogWrite.naver';
 
   // 로그인 1번
-  let page = await context.newPage();
+  const page = await context.newPage();
   await doLogin(page, naverID, naverPW);
   await page.waitForTimeout(2000);
   await context.storageState({ path: SESSION_FILE });
@@ -735,8 +735,6 @@ async function publishBatch(posts, config, onProgress) {
     const post = posts[i];
     if (onProgress) onProgress(i, total, post.title, 'start');
     try {
-      // 페이지가 닫혔으면 새로 열기 (예약 완료 후 네이버가 창 닫는 경우 대응)
-      if (page.isClosed()) page = await context.newPage();
       await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(3000);
 
