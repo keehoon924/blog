@@ -468,39 +468,47 @@ async function clickDialogPublishBtn(page) {
   return { clicked: true };
 }
 
-// 카테고리 설정 — 모든 프레임에서 탐색
+// 카테고리 설정 — evaluate 기반, 드롭다운 닫힘 후 발행 다이얼로그 유지
 async function selectNaverCategory(page, categoryName) {
   if (!categoryName || !categoryName.trim()) return { skipped: true };
   const name = categoryName.trim();
   try {
-    const catFound = await findInFrames(page, 'button.selectbox_button__jb1Dt');
-    if (!catFound) return { error: '카테고리 드롭다운 버튼 없음' };
-    await catFound.el.click({ force: true });
-    await page.waitForTimeout(1200);
+    // 카테고리 드롭다운 열기
+    const opened = await evalInFrames(page, () => {
+      const btn = document.querySelector('button.selectbox_button__jb1Dt');
+      if (btn) { btn.click(); return true; }
+      return false;
+    });
+    if (!opened) return { error: '카테고리 드롭다운 버튼 없음' };
+    await page.waitForTimeout(1000);
 
-    // 카테고리 옵션: label.radio_label__mB6ia (같은 프레임 내)
-    const labels = await catFound.frame.$$('label.radio_label__mB6ia');
-    let target = null;
-    for (const lbl of labels) {
-      const txt = await lbl.evaluate(el => {
-        const r = el.getBoundingClientRect();
-        return r.width > 0 && r.height > 0 ? el.textContent.trim() : '';
+    // 카테고리 항목 클릭 (label.radio_label__mB6ia 텍스트 매칭)
+    const clicked = await evalInFrames(page, (targetName) => {
+      const labels = Array.from(document.querySelectorAll('label.radio_label__mB6ia'));
+      const visible = labels.filter(l => l.getBoundingClientRect().height > 0);
+      const found = visible.find(l => {
+        const txt = l.textContent.trim();
+        return txt === targetName || txt.includes(targetName);
       });
-      if (txt === name || (txt && txt.includes(name))) { target = lbl; break; }
-    }
+      if (found) {
+        found.click();
+        // 같은 span 안의 radio input도 클릭 (클릭 기록 [11][12] 순서)
+        const radio = found.closest('span')?.querySelector('input.radio_item__PIBr7');
+        if (radio) radio.click();
+        return found.textContent.trim();
+      }
+      // 없으면 사용 가능 목록 반환
+      return { available: visible.map(l => l.textContent.trim()) };
+    }, name);
 
-    if (!target) {
-      const available = await Promise.all(labels.map(l => l.evaluate(el => el.textContent.trim())));
-      console.warn(`[카테고리] "${name}" 없음. 사용 가능: ${available.filter(Boolean).slice(0, 20).join(', ')}`);
+    if (!clicked) return { error: '카테고리 드롭다운 열기 실패' };
+    if (clicked.available) {
+      console.warn(`[카테고리] "${name}" 없음. 사용 가능: ${clicked.available.slice(0, 10).join(', ')}`);
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(500);
       return { error: `"${name}" 없음` };
     }
-
-    await target.click({ force: true });
-    console.log(`[카테고리] "${name}" 클릭됨`);
+    console.log(`[카테고리] "${clicked}" 클릭됨`);
     await page.waitForTimeout(800);
-    await forceCloseLayerPopup(page);
     return { clicked: name };
   } catch (err) {
     return { error: err.message };
@@ -538,16 +546,27 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
     await page.waitForTimeout(500);
   }
 
-  // 3) "예약" 라디오 라벨 클릭
-  const reserveFound = await findInFrames(page, 'label[for="radio_time2"]');
-  if (!reserveFound) throw new Error('예약 라디오 라벨을 찾을 수 없습니다.');
-  await reserveFound.el.click({ force: true });
+  // 3) "예약" 라벨 + radio_time2 클릭 (클릭 기록 [13][14] 순서)
+  const reserved = await evalInFrames(page, () => {
+    // 텍스트가 "예약"인 label 클릭
+    const labels = Array.from(document.querySelectorAll('label.radio_label__mB6ia'));
+    const lbl = labels.find(l => l.textContent.trim() === '예약');
+    if (lbl) lbl.click();
+    // input#radio_time2 직접 클릭
+    const radio = document.querySelector('input#radio_time2');
+    if (radio) radio.click();
+    return !!(lbl || radio);
+  });
+  if (!reserved) throw new Error('예약 라디오를 찾을 수 없습니다.');
   await page.waitForTimeout(1000);
 
   // 4) 날짜 input 클릭
-  const dateFound = await findInFrames(page, 'input.input_date__QmA0s');
-  if (!dateFound) throw new Error('날짜 input을 찾을 수 없습니다.');
-  await dateFound.el.click({ force: true });
+  const dateClicked = await evalInFrames(page, () => {
+    const el = document.querySelector('input.input_date__QmA0s');
+    if (el) { el.click(); return true; }
+    return false;
+  });
+  if (!dateClicked) throw new Error('날짜 input을 찾을 수 없습니다.');
   await page.waitForTimeout(800);
 
   // 5) 목표 달까지 이동
@@ -566,9 +585,12 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
     if (current.year > targetYear || (current.year === targetYear && current.month > targetMonth)) {
       throw new Error(`목표 ${targetYear}-${targetMonth}이(가) 현재 표시보다 과거 — 예약 불가`);
     }
-    const nextFound = await findInFrames(page, 'button.ui-datepicker-next:not(.ui-state-disabled)');
-    if (!nextFound) throw new Error('다음달 버튼이 비활성화');
-    await nextFound.el.click({ force: true });
+    const nextClicked = await evalInFrames(page, () => {
+      const btn = document.querySelector('button.ui-datepicker-next:not(.ui-state-disabled)');
+      if (btn) { btn.click(); return true; }
+      return false;
+    });
+    if (!nextClicked) throw new Error('다음달 버튼이 비활성화');
     await page.waitForTimeout(400);
   }
 
@@ -583,12 +605,20 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
   if (!dayResult || dayResult.error) throw new Error(dayResult?.error || '날짜 클릭 실패');
   await page.waitForTimeout(800);
 
-  // 7) 시간 select
-  await selectInFrames(page, 'select.hour_option__J_heO', String(targetHour).padStart(2, '0'));
+  // 7) 시간 select — evaluate 기반
+  await evalInFrames(page, (h) => {
+    const sel = document.querySelector('select.hour_option__J_heO');
+    if (sel) { sel.value = h; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; }
+    return false;
+  }, String(targetHour).padStart(2, '0'));
   await page.waitForTimeout(400);
 
-  // 8) 분 select
-  await selectInFrames(page, 'select.minute_option__Vb3xB', String(targetMinute).padStart(2, '0'));
+  // 8) 분 select — evaluate 기반
+  await evalInFrames(page, (m) => {
+    const sel = document.querySelector('select.minute_option__Vb3xB');
+    if (sel) { sel.value = m; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; }
+    return false;
+  }, String(targetMinute).padStart(2, '0'));
   await page.waitForTimeout(400);
 
   // 9) 다이얼로그 내 "발행" 버튼 클릭 (robust)
