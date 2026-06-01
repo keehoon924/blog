@@ -626,10 +626,11 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
 
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
-  const writeUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${naverID}`;
+  const writeUrl = 'https://blog.naver.com/GoBlogWrite.naver';
 
   // 항상 로그인 페이지부터 시작 — 보안문자가 뜨면 사용자가 직접 해결 후 자동 진행
   await doLogin(page, naverID, naverPW);
+  await page.waitForTimeout(2000);
   await context.storageState({ path: SESSION_FILE });
   await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
@@ -708,11 +709,11 @@ async function publishBatch(posts, config, onProgress) {
   });
 
   const page = await context.newPage();
-  const writeUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${naverID}`;
+  const writeUrl = 'https://blog.naver.com/GoBlogWrite.naver';
 
   // 로그인 1번
   await doLogin(page, naverID, naverPW);
-  await page.waitForTimeout(3000); // 세션 정착 대기
+  await page.waitForTimeout(2000);
   await context.storageState({ path: SESSION_FILE });
 
   const total = posts.length;
@@ -722,13 +723,7 @@ async function publishBatch(posts, config, onProgress) {
     if (onProgress) onProgress(i, total, post.title, 'start');
     try {
       await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(2500);
-
-      // 글쓰기 페이지가 아니면 (로그인 세션 문제) 한 번 더 시도
-      if (!page.url().includes('PostWriteForm')) {
-        await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForTimeout(2500);
-      }
+      await page.waitForTimeout(3000);
 
       await dismissHelpPanel(page);
       await dismissDraftPopup(page);
