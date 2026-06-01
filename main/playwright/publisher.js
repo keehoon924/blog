@@ -108,12 +108,18 @@ async function clickToolbarBtn(page, dataName, dataType = null) {
 }
 
 // 정렬 적용 (center | left | right)
+// 클릭 기록 확인: 드롭다운 = button.se-align-center-toolbar-button, 옵션 = button.se-toolbar-option-align-{type}-button
 async function applyAlign(page, alignType) {
-  await clickToolbarBtn(page, 'align-drop-down-with-justify', 'drop-down');
+  const dropdownBtn = await page.$('button.se-align-center-toolbar-button');
+  if (dropdownBtn) {
+    await dropdownBtn.click({ force: true });
+  } else {
+    await clickToolbarBtn(page, 'align-drop-down-with-justify', 'drop-down');
+  }
   await page.waitForTimeout(300);
-  const btn = await page.$(`button[data-name="align-drop-down-with-justify"][data-value="${alignType}"]`);
-  if (btn) {
-    await btn.click();
+  const optBtn = await page.$(`button.se-toolbar-option-align-${alignType}-button`);
+  if (optBtn) {
+    await optBtn.click({ force: true });
     await page.waitForTimeout(300);
     return true;
   }
@@ -565,21 +571,16 @@ async function dismissDraftPopup(page) {
   } catch (_) {}
 }
 
-// 네이버 에디터 우측 '도움말' 패널 닫기 (테스트 검증됨)
-// 닫기 버튼 클릭 시도 → 5초 안에 안 사라지면 CSS 강제 숨김
+// 네이버 에디터 우측 '도움말' 패널 닫기
+// 클릭 기록 확인: button.se-help-panel-close-button (x:1467, y:31 — 창 최대화 기준)
+// 일반 Playwright click() 사용 (dispatchEvent 아님)
 async function dismissHelpPanel(page) {
   try {
-    await page.evaluate(() => {
-      // 1) 닫기 버튼 직접 클릭 이벤트 강제 발생
-      const btn = document.querySelector('button.se-help-panel-close-button');
-      if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-
-      // 2) 패널 부모 강제 숨김
-      ['se-help-header', 'se-help-header-dark'].forEach(cls => {
-        document.querySelectorAll('.' + cls).forEach(el => el.style.setProperty('display', 'none', 'important'));
-      });
-    });
-    await page.waitForTimeout(800);
+    const btn = await page.$('button.se-help-panel-close-button');
+    if (btn) {
+      await btn.click({ force: true });
+      await page.waitForTimeout(1000);
+    }
   } catch (_) {}
 }
 
@@ -593,12 +594,12 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
     headless: false,
     slowMo: 20,
     channel: 'chrome',
-    args: ['--disable-blink-features=AutomationControlled'],
+    args: ['--disable-blink-features=AutomationControlled', '--start-maximized'],
   });
 
   const contextOptions = {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    viewport: { width: 1280, height: 900 },
+    viewport: null,
     extraHTTPHeaders: { 'Accept-Language': 'ko-KR,ko;q=0.9' },
   };
 
@@ -619,12 +620,25 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
   await dismissDraftPopup(page);
   await page.waitForTimeout(800);
 
-  // ── Step 1: 제목 입력 ──
-  const titleEl = await page.$('.se-title-text');
+  // ── Step 1: 폰트 크기 19 설정 (클릭 기록 순서: 도움말닫기 → 폰트19 → 가운데정렬 → 제목클릭) ──
+  const fontSizeBtn = await page.$('button.se-font-size-code-toolbar-button');
+  if (fontSizeBtn) {
+    await fontSizeBtn.click({ force: true });
+    await page.waitForTimeout(400);
+    const fs19 = await page.$('button[class*="font-size-code-fs19"]');
+    if (fs19) await fs19.click({ force: true });
+    await page.waitForTimeout(300);
+  }
+
+  // ── Step 2: 가운데 정렬 설정 ──
+  await applyAlign(page, 'center');
+  await page.waitForTimeout(400);
+
+  // ── Step 3: 제목 클릭 후 입력 ──
+  const titleEl = await page.$('.se-title-text .se-text-paragraph');
   if (titleEl) {
-    await titleEl.scrollIntoViewIfNeeded();
-    await titleEl.click();
-    await page.waitForTimeout(500);
+    await titleEl.click({ force: true });
+    await page.waitForTimeout(400);
     await page.keyboard.press('Control+a');
     await page.keyboard.press('Backspace');
     await page.waitForTimeout(200);
@@ -633,18 +647,14 @@ async function publishToNaver({ title, content, hashtags, relatedPosts, config, 
       await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
     }
   }
-
-  await page.waitForTimeout(800);
-
-  // ── Step 2: 본문 영역으로 이동 ──
-  await page.keyboard.press('Enter');
   await page.waitForTimeout(500);
 
-  // ── Step 2-1: 본문 가운데 정렬 — 항상 적용 (1회 설정으로 이후 전체 본문 자동 적용) ──
-  await applyAlign(page, 'center');
+  // ── Step 4: 본문 클릭 ──
+  const bodyEl = await page.$('.se-module-text:not(.se-title-text) .se-text-paragraph');
+  if (bodyEl) await bodyEl.click({ force: true });
   await page.waitForTimeout(400);
 
-  // ── Step 3: 본문 입력 (이미지 마커 포함) ──
+  // ── Step 5: 본문 입력 (이미지 마커 포함) ──
   await typeContentWithMarkers(page, content, images);
 
   // ── Step 4: 커서를 끝으로 ──
@@ -677,12 +687,12 @@ async function publishBatch(posts, config, onProgress) {
     headless: false,
     slowMo: 20,
     channel: 'chrome',
-    args: ['--disable-blink-features=AutomationControlled'],
+    args: ['--disable-blink-features=AutomationControlled', '--start-maximized'],
   });
 
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    viewport: { width: 1280, height: 900 },
+    viewport: null,
     extraHTTPHeaders: { 'Accept-Language': 'ko-KR,ko;q=0.9' },
   });
 
@@ -703,32 +713,12 @@ async function publishBatch(posts, config, onProgress) {
       await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(3000);
 
-      // [1] 도움말 닫기 버튼 대기 후 클릭 (클릭기록 순서 그대로)
+      // [1] 도움말 닫기 (첫 글만 뜸 — 없으면 자동 건너뜀)
       await dismissHelpPanel(page);
       await dismissDraftPopup(page);
       await page.waitForTimeout(800);
 
-      // 제목 입력 — evaluate로 직접 포커스 강제 지정
-      await page.evaluate(() => {
-        const el = document.querySelector('.se-title-text');
-        if (el) el.focus();
-      });
-      await page.waitForTimeout(400);
-      await page.keyboard.press('Control+a');
-      await page.keyboard.press('Backspace');
-      await page.waitForTimeout(200);
-      for (const char of post.title) {
-        await page.keyboard.type(char);
-        await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
-      }
-      await page.waitForTimeout(500);
-
-      // [2] 본문 단락 클릭
-      const bodyEl = await page.$('.se-text-paragraph');
-      if (bodyEl) await bodyEl.click({ force: true });
-      await page.waitForTimeout(500);
-
-      // [4][5] 폰트 크기 19 설정
+      // [2][3] 폰트 크기 19 (클릭 기록 순서: 도움말닫기 → 폰트19 → 가운데정렬 → 제목클릭)
       const fontSizeBtn = await page.$('button.se-font-size-code-toolbar-button');
       if (fontSizeBtn) {
         await fontSizeBtn.click({ force: true });
@@ -738,15 +728,31 @@ async function publishBatch(posts, config, onProgress) {
         await page.waitForTimeout(300);
       }
 
-      // [6][7] 가운데 정렬
+      // [4][5] 가운데 정렬
       await applyAlign(page, 'center');
       await page.waitForTimeout(400);
 
-      // [8] 본문 다시 클릭 후 본문 입력
+      // [6] 제목 클릭 후 입력
+      const titleEl = await page.$('.se-title-text .se-text-paragraph');
+      if (titleEl) {
+        await titleEl.click({ force: true });
+        await page.waitForTimeout(400);
+        await page.keyboard.press('Control+a');
+        await page.keyboard.press('Backspace');
+        await page.waitForTimeout(200);
+        for (const char of post.title) {
+          await page.keyboard.type(char);
+          await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
+        }
+      }
+      await page.waitForTimeout(500);
+
+      // [7] 본문 클릭
+      const bodyEl = await page.$('.se-module-text:not(.se-title-text) .se-text-paragraph');
       if (bodyEl) await bodyEl.click({ force: true });
       await page.waitForTimeout(400);
 
-      // 본문
+      // 본문 입력
       await typeContentWithMarkers(page, post.content, post.images || []);
       await page.keyboard.press('Control+End');
       await page.waitForTimeout(200);
