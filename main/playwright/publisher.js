@@ -572,20 +572,22 @@ async function dismissDraftPopup(page) {
 }
 
 // 네이버 에디터 우측 '도움말' 패널 닫기
-// page.mouse.click(실제 좌표) 사용 — 실제 사용자 마우스 클릭과 동일하게 동작
+// page.evaluate 내부에서 네이티브 btn.click() 호출 — 메인/iframe 모두 접근 가능
 async function dismissHelpPanel(page) {
   try {
-    const btn = await page.$('button.se-help-panel-close-button');
-    if (!btn) return;
-    const box = await btn.boundingBox();
-    if (box) {
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    } else {
-      await btn.click({ force: true });
+    // 메인 페이지 + 모든 프레임에서 버튼 탐색 후 네이티브 click()
+    const frames = [page, ...page.frames()];
+    for (const ctx of frames) {
+      try {
+        const found = await ctx.evaluate(() => {
+          const btn = document.querySelector('button.se-help-panel-close-button');
+          if (btn) { btn.click(); return true; }
+          return false;
+        });
+        if (found) break;
+      } catch (_) {}
     }
-    // 패널이 사라질 때까지 대기 (최대 3초)
-    await page.waitForSelector('button.se-help-panel-close-button', { state: 'hidden', timeout: 3000 }).catch(() => {});
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1200);
   } catch (_) {}
 }
 
@@ -722,43 +724,95 @@ async function publishBatch(posts, config, onProgress) {
       await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(3000);
 
+      // 메인 + 모든 하위 프레임 목록 (에디터가 iframe 안에 있을 수 있음)
+      const frames = [page, ...page.frames()];
+
       // [1] 도움말 닫기 (첫 글만 뜸 — 없으면 자동 건너뜀)
       await dismissHelpPanel(page);
       await dismissDraftPopup(page);
       await page.waitForTimeout(800);
 
-      // [2][3] 폰트 크기 19 (클릭 기록 순서: 도움말닫기 → 폰트19 → 가운데정렬 → 제목클릭)
-      const fontSizeBtn = await page.$('button.se-font-size-code-toolbar-button');
-      if (fontSizeBtn) {
-        await fontSizeBtn.click({ force: true });
-        await page.waitForTimeout(400);
-        const fs19 = await page.$('button[class*="font-size-code-fs19"]');
-        if (fs19) await fs19.click({ force: true });
-        await page.waitForTimeout(300);
+      // [2][3] 폰트 크기 19 — evaluate 네이티브 click()
+      for (const ctx of frames) {
+        try {
+          const ok = await ctx.evaluate(() => {
+            const btn = document.querySelector('button.se-font-size-code-toolbar-button');
+            if (btn) { btn.click(); return true; }
+            return false;
+          });
+          if (ok) break;
+        } catch (_) {}
       }
+      await page.waitForTimeout(500);
+      for (const ctx of frames) {
+        try {
+          const ok = await ctx.evaluate(() => {
+            const btn = document.querySelector('button[class*="font-size-code-fs19"]');
+            if (btn) { btn.click(); return true; }
+            return false;
+          });
+          if (ok) break;
+        } catch (_) {}
+      }
+      await page.waitForTimeout(300);
 
-      // [4][5] 가운데 정렬
-      await applyAlign(page, 'center');
+      // [4][5] 가운데 정렬 — evaluate 네이티브 click()
+      for (const ctx of frames) {
+        try {
+          const ok = await ctx.evaluate(() => {
+            const btn = document.querySelector('button.se-align-center-toolbar-button');
+            if (btn) { btn.click(); return true; }
+            return false;
+          });
+          if (ok) break;
+        } catch (_) {}
+      }
+      await page.waitForTimeout(400);
+      for (const ctx of frames) {
+        try {
+          const ok = await ctx.evaluate(() => {
+            const btn = document.querySelector('button.se-toolbar-option-align-center-button');
+            if (btn) { btn.click(); return true; }
+            return false;
+          });
+          if (ok) break;
+        } catch (_) {}
+      }
       await page.waitForTimeout(400);
 
-      // [6] 제목 클릭 후 입력
-      const titleEl = await page.$('.se-title-text .se-text-paragraph');
-      if (titleEl) {
-        await titleEl.click({ force: true });
-        await page.waitForTimeout(400);
-        await page.keyboard.press('Control+a');
-        await page.keyboard.press('Backspace');
-        await page.waitForTimeout(200);
-        for (const char of post.title) {
-          await page.keyboard.type(char);
-          await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
-        }
+      // [6] 제목 클릭 후 입력 — evaluate 네이티브 click() + focus()
+      for (const ctx of frames) {
+        try {
+          const ok = await ctx.evaluate(() => {
+            const el = document.querySelector('.se-title-text .se-text-paragraph');
+            if (el) { el.click(); el.focus(); return true; }
+            return false;
+          });
+          if (ok) break;
+        } catch (_) {}
+      }
+      await page.waitForTimeout(400);
+      await page.keyboard.press('Control+a');
+      await page.keyboard.press('Backspace');
+      await page.waitForTimeout(200);
+      for (const char of post.title) {
+        await page.keyboard.type(char);
+        await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
       }
       await page.waitForTimeout(500);
 
-      // [7] 본문 클릭
-      const bodyEl = await page.$('.se-module-text:not(.se-title-text) .se-text-paragraph');
-      if (bodyEl) await bodyEl.click({ force: true });
+      // [7] 본문 클릭 — evaluate 네이티브 click() + focus()
+      for (const ctx of frames) {
+        try {
+          const ok = await ctx.evaluate(() => {
+            const paras = Array.from(document.querySelectorAll('.se-text-paragraph'));
+            const body = paras.find(p => !p.closest('.se-title-text'));
+            if (body) { body.click(); body.focus(); return true; }
+            return false;
+          });
+          if (ok) break;
+        } catch (_) {}
+      }
       await page.waitForTimeout(400);
 
       // 본문 입력
