@@ -649,23 +649,29 @@ async function dismissDraftPopup(page) {
   } catch (_) {}
 }
 
-// 네이버 에디터 우측 '도움말' 패널 닫기
-// page.evaluate 내부에서 네이티브 btn.click() 호출 — 메인/iframe 모두 접근 가능
+// 네이버 에디터 우측 '도움말' 패널 닫기 — 최대 10회 재시도 (iframe 로딩 대기)
 async function dismissHelpPanel(page) {
   try {
-    // 메인 페이지 + 모든 프레임에서 버튼 탐색 후 네이티브 click()
-    const frames = [page, ...page.frames()];
-    for (const ctx of frames) {
-      try {
-        const found = await ctx.evaluate(() => {
-          const btn = document.querySelector('button.se-help-panel-close-button');
-          if (btn) { btn.click(); return true; }
-          return false;
-        });
-        if (found) break;
-      } catch (_) {}
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const frames = [page, ...page.frames()];
+      let found = false;
+      for (const ctx of frames) {
+        try {
+          const ok = await ctx.evaluate(() => {
+            const btn = document.querySelector('button.se-help-panel-close-button');
+            if (btn) { btn.click(); return true; }
+            return false;
+          });
+          if (ok) { found = true; break; }
+        } catch (_) {}
+      }
+      if (found) {
+        console.log('[도움말] 닫기 완료');
+        await page.waitForTimeout(600);
+        break;
+      }
+      await page.waitForTimeout(300);
     }
-    await page.waitForTimeout(1200);
   } catch (_) {}
 }
 
@@ -799,6 +805,8 @@ async function publishBatch(posts, config, onProgress) {
       if (page.isClosed()) {
         page = await context.newPage();
       }
+      // 페이지 이동 시 "떠나겠습니까?" 다이얼로그 자동 수락
+      page.once('dialog', dialog => dialog.accept().catch(() => {}));
       await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(3000);
 
