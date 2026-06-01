@@ -8,7 +8,8 @@
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "inspect": "node main/playwright/inspector.js",
-    "record": "node main/playwright/click-recorder.js"
+    "record": "node main/playwright/click-recorder.js",
+    "record:write": "node main/playwright/write-then-record.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
