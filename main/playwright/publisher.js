@@ -356,20 +356,67 @@ async function doLogin(page, id, pw) {
   );
 }
 
+// ── 프레임 헬퍼 ──────────────────────────────────────────────────────────────
+// 모든 프레임에서 element 탐색 → { el, frame } 반환
+async function findInFrames(page, selector) {
+  for (const frame of page.frames()) {
+    try {
+      const el = await frame.$(selector);
+      if (el) return { el, frame };
+    } catch (_) {}
+  }
+  return null;
+}
+
+// 모든 프레임에서 element 대기 (timeout ms)
+async function waitInFrames(page, selector, timeout = 10000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    for (const frame of page.frames()) {
+      try {
+        const el = await frame.$(selector);
+        if (el) return { el, frame };
+      } catch (_) {}
+    }
+    await page.waitForTimeout(300);
+  }
+  throw new Error(`Timeout: "${selector}" not found in any frame`);
+}
+
+// 모든 프레임에서 selectOption 적용
+async function selectInFrames(page, selector, value) {
+  for (const frame of page.frames()) {
+    try {
+      const el = await frame.$(selector);
+      if (el) { await frame.selectOption(selector, value); return true; }
+    } catch (_) {}
+  }
+  return false;
+}
+
+// 모든 프레임에서 evaluate 실행 (첫 번째 성공 프레임 결과 반환)
+async function evalInFrames(page, fn, ...args) {
+  for (const frame of page.frames()) {
+    try {
+      const result = await frame.evaluate(fn, ...args);
+      if (result && result !== false) return result;
+    } catch (_) {}
+  }
+  return null;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // 자동 발행 — 발행 다이얼로그 진입 후 다이얼로그 내 '발행' 버튼 클릭
 async function autoFinalizePublish(page) {
-  const topBtn = await page.$('button.publish_btn__m9KHH');
-  if (!topBtn) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
-  await topBtn.click({ force: true });
+  const found = await findInFrames(page, 'button.publish_btn__m9KHH');
+  if (!found) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
+  await found.el.click({ force: true });
 
-  // 다이얼로그 열림 확인 — 라디오 또는 컨테이너 둘 다 허용
-  await page.waitForSelector('input[name="radio_time"], [class*="layer_publish"], [class*="publish_layer"]', { timeout: 10000 });
+  await waitInFrames(page, 'input[name="radio_time"], input#radio_time2', 10000);
   await page.waitForTimeout(1800);
 
-  // robust selector로 다이얼로그 내 발행 버튼 클릭
   await clickDialogPublishBtn(page);
-
-  await page.waitForTimeout(5000);
+  try { await page.waitForTimeout(5000); } catch (_) {}
 }
 
 // layer_popup 드롭다운 강제 닫기 (layer_publish 다이얼로그 제외)
@@ -384,76 +431,53 @@ async function forceCloseLayerPopup(page) {
   await page.waitForTimeout(400);
 }
 
-// 다이얼로그 내 발행 버튼 클릭
-// 클릭 기록 확인: cls="confirm_btn__WEaBq" (다이얼로그 하단 확인 버튼)
-// dispatchEvent 직접 사용 — Playwright 포인터/가시성 체크 완전 우회 (테스트 검증됨)
+// 다이얼로그 내 발행 확인 버튼 클릭 (confirm_btn__WEaBq)
 async function clickDialogPublishBtn(page) {
-  const result = await page.evaluate(() => {
-    const btn = document.querySelector('button.confirm_btn__WEaBq');
-    if (!btn) return { ok: false, reason: '버튼 없음' };
-    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-    return { ok: true };
-  });
-  console.log(`[발행 버튼] confirm_btn__WEaBq dispatchEvent → ${JSON.stringify(result)}`);
-  if (!result.ok) throw new Error('발행 버튼 클릭 실패: ' + result.reason);
+  const found = await findInFrames(page, 'button.confirm_btn__WEaBq');
+  if (!found) throw new Error('발행 확인 버튼(confirm_btn__WEaBq)을 찾을 수 없습니다.');
+  await found.el.click({ force: true });
+  console.log('[발행 버튼] confirm_btn__WEaBq 클릭됨');
 
   await page.waitForTimeout(3000);
 
-  const stillOpen = await page.evaluate(() => {
+  // 다이얼로그가 아직 열려있으면 재시도
+  const stillOpen = await evalInFrames(page, () => {
     const r = document.querySelector('input#radio_time2');
-    if (!r) return false;
-    return r.getBoundingClientRect().width > 0;
+    return r ? r.getBoundingClientRect().width > 0 : false;
   });
   if (stillOpen) {
-    console.warn('[발행 버튼] 다이얼로그 여전히 열림 — dispatchEvent 재시도');
-    await page.evaluate(() => {
-      const btn = document.querySelector('button.confirm_btn__WEaBq');
-      if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-    });
+    console.warn('[발행 버튼] 다이얼로그 여전히 열림 — 재시도');
+    const found2 = await findInFrames(page, 'button.confirm_btn__WEaBq');
+    if (found2) await found2.el.click({ force: true });
     await page.waitForTimeout(3000);
   }
   return { clicked: true };
 }
 
-// 카테고리 설정 — 클릭 기록으로 확인된 정확한 셀렉터 사용
-// 드롭다운: button.selectbox_button__jb1Dt / 옵션: label.radio_label__mB6ia
+// 카테고리 설정 — 모든 프레임에서 탐색
 async function selectNaverCategory(page, categoryName) {
   if (!categoryName || !categoryName.trim()) return { skipped: true };
   const name = categoryName.trim();
   try {
-    const catBtn = await page.$('button.selectbox_button__jb1Dt');
-    if (!catBtn) return { error: '카테고리 드롭다운 버튼 없음' };
-    await catBtn.click({ force: true });
+    const catFound = await findInFrames(page, 'button.selectbox_button__jb1Dt');
+    if (!catFound) return { error: '카테고리 드롭다운 버튼 없음' };
+    await catFound.el.click({ force: true });
     await page.waitForTimeout(1200);
 
-    // 클릭 기록 확인: 카테고리 옵션은 label.radio_label__mB6ia
-    const labels = await page.$$('label.radio_label__mB6ia');
+    // 카테고리 옵션: label.radio_label__mB6ia (같은 프레임 내)
+    const labels = await catFound.frame.$$('label.radio_label__mB6ia');
     let target = null;
-
     for (const lbl of labels) {
       const txt = await lbl.evaluate(el => {
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 ? el.textContent.trim() : '';
       });
-      if (txt === name) { target = lbl; break; }
-    }
-    if (!target) {
-      for (const lbl of labels) {
-        const txt = await lbl.evaluate(el => {
-          const r = el.getBoundingClientRect();
-          return r.width > 0 && r.height > 0 ? el.textContent.trim() : '';
-        });
-        if (txt && txt.includes(name)) { target = lbl; break; }
-      }
+      if (txt === name || (txt && txt.includes(name))) { target = lbl; break; }
     }
 
     if (!target) {
-      const available = [];
-      for (const lbl of labels) {
-        const txt = await lbl.evaluate(el => el.textContent.trim());
-        if (txt) available.push(txt);
-      }
-      console.warn(`[카테고리] "${name}" 없음. 사용 가능: ${available.slice(0, 20).join(', ')}`);
+      const available = await Promise.all(labels.map(l => l.evaluate(el => el.textContent.trim())));
+      console.warn(`[카테고리] "${name}" 없음. 사용 가능: ${available.filter(Boolean).slice(0, 20).join(', ')}`);
       await page.keyboard.press('Escape');
       await page.waitForTimeout(500);
       return { error: `"${name}" 없음` };
@@ -483,38 +507,38 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
   // 분 10분 단위 반올림 (네이버 제약), 최대 50
   const targetMinute = Math.min(Math.round(rawMinute / 10) * 10, 50);
 
-  // 1) 우상단 발행 버튼 → 다이얼로그 열림 (force:true — 도움말 패널이 겹쳐도 통과)
-  const topBtn = await page.$('button.publish_btn__m9KHH');
-  if (!topBtn) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
-  await topBtn.click({ force: true });
-  // 다이얼로그 열림 확인 — 예약 라디오로
-  await page.waitForSelector('input#radio_time2, input[name="radio_time"]', { timeout: 10000 });
+  // 1) 우상단 발행 버튼 클릭 — 모든 프레임 탐색
+  const topFound = await findInFrames(page, 'button.publish_btn__m9KHH');
+  if (!topFound) throw new Error('우상단 발행 버튼을 찾을 수 없습니다.');
+  await topFound.el.click({ force: true });
+
+  // 다이얼로그 열림 확인
+  await waitInFrames(page, 'input#radio_time2, input[name="radio_time"]', 10000);
   await page.waitForTimeout(1800);
 
-  // 2) 카테고리 선택 (옵션) — 다이얼로그 열린 직후
+  // 2) 카테고리 선택
   if (naverCategory) {
     const catResult = await selectNaverCategory(page, naverCategory);
     if (catResult.error) console.warn('[카테고리 설정] ' + catResult.error);
     else if (catResult.clicked) console.log('[카테고리 설정] "' + naverCategory + '" 선택됨');
-    // selectNaverCategory 내부에서 forceCloseLayerPopup 이미 호출됨
     await page.waitForTimeout(500);
   }
 
-  // 3) "예약" 라디오 라벨 클릭 (radio_time2)
-  const reserveLabel = await page.$('label[for="radio_time2"]');
-  if (!reserveLabel) throw new Error('예약 라디오 라벨을 찾을 수 없습니다.');
-  await reserveLabel.click();
+  // 3) "예약" 라디오 라벨 클릭
+  const reserveFound = await findInFrames(page, 'label[for="radio_time2"]');
+  if (!reserveFound) throw new Error('예약 라디오 라벨을 찾을 수 없습니다.');
+  await reserveFound.el.click({ force: true });
   await page.waitForTimeout(1000);
 
-  // 4) 날짜 input 클릭 → jQuery UI datepicker 열림
-  const dateInput = await page.$('input.input_date__QmA0s');
-  if (!dateInput) throw new Error('날짜 input을 찾을 수 없습니다.');
-  await dateInput.click();
+  // 4) 날짜 input 클릭
+  const dateFound = await findInFrames(page, 'input.input_date__QmA0s');
+  if (!dateFound) throw new Error('날짜 input을 찾을 수 없습니다.');
+  await dateFound.el.click({ force: true });
   await page.waitForTimeout(800);
 
-  // 5) 목표 달까지 next 버튼으로 이동 (최대 24개월)
+  // 5) 목표 달까지 이동
   for (let i = 0; i < 24; i++) {
-    const current = await page.evaluate(() => {
+    const current = await evalInFrames(page, () => {
       const y = document.querySelector('.ui-datepicker-year');
       const m = document.querySelector('.ui-datepicker-month');
       if (!y || !m) return null;
@@ -526,31 +550,31 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
     if (!current) throw new Error('캘린더 헤더(년/월)를 읽을 수 없습니다.');
     if (current.year === targetYear && current.month === targetMonth) break;
     if (current.year > targetYear || (current.year === targetYear && current.month > targetMonth)) {
-      throw new Error(`목표 ${targetYear}-${targetMonth}이(가) 현재 표시 ${current.year}-${current.month}보다 과거 — 예약 불가`);
+      throw new Error(`목표 ${targetYear}-${targetMonth}이(가) 현재 표시보다 과거 — 예약 불가`);
     }
-    const nextBtn = await page.$('button.ui-datepicker-next:not(.ui-state-disabled)');
-    if (!nextBtn) throw new Error('다음달 버튼이 비활성화되어 더 이상 진행 불가');
-    await nextBtn.click();
+    const nextFound = await findInFrames(page, 'button.ui-datepicker-next:not(.ui-state-disabled)');
+    if (!nextFound) throw new Error('다음달 버튼이 비활성화');
+    await nextFound.el.click({ force: true });
     await page.waitForTimeout(400);
   }
 
-  // 6) 목표 날짜 버튼 클릭
-  const dayResult = await page.evaluate((day) => {
+  // 6) 목표 날짜 클릭
+  const dayResult = await evalInFrames(page, (day) => {
     const buttons = Array.from(document.querySelectorAll('.ui-datepicker td:not(.ui-state-disabled) > button.ui-state-default'));
     const btn = buttons.find(b => b.textContent.trim() === String(day));
-    if (!btn) return { error: `${day}일 클릭 불가 (이미 지났거나 비활성)` };
+    if (!btn) return { error: `${day}일 클릭 불가` };
     btn.click();
     return { clicked: true };
   }, targetDay);
-  if (dayResult.error) throw new Error(dayResult.error);
+  if (!dayResult || dayResult.error) throw new Error(dayResult?.error || '날짜 클릭 실패');
   await page.waitForTimeout(800);
 
   // 7) 시간 select
-  await page.selectOption('select.hour_option__J_heO', String(targetHour).padStart(2, '0'));
+  await selectInFrames(page, 'select.hour_option__J_heO', String(targetHour).padStart(2, '0'));
   await page.waitForTimeout(400);
 
-  // 8) 분 select (10분 단위)
-  await page.selectOption('select.minute_option__Vb3xB', String(targetMinute).padStart(2, '0'));
+  // 8) 분 select
+  await selectInFrames(page, 'select.minute_option__Vb3xB', String(targetMinute).padStart(2, '0'));
   await page.waitForTimeout(400);
 
   // 9) 다이얼로그 내 "발행" 버튼 클릭 (robust)
