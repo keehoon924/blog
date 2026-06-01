@@ -117,7 +117,7 @@ async function waitInFrames(page, selector, timeout = 15000) {
 
   // ── 글쓰기 페이지 이동 ──
   log('[2] 글쓰기 페이지 이동...');
-  const writeUrl = `https://blog.naver.com/${naverID}/postwrite`;
+  const writeUrl = 'https://blog.naver.com/GoBlogWrite.naver';
   await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await sleep(3000);
 
