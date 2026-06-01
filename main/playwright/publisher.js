@@ -569,16 +569,22 @@ async function dismissDraftPopup(page) {
 // 닫기 버튼 클릭 시도 → 5초 안에 안 사라지면 CSS 강제 숨김
 async function dismissHelpPanel(page) {
   try {
-    // 버튼이 나타날 때까지 최대 5초 대기 후 클릭
-    await page.waitForSelector('button.se-help-panel-close-button', { timeout: 5000 });
-    const closeBtn = await page.$('button.se-help-panel-close-button');
+    // 1) 버튼 클릭 시도 (publish-test-dump 검증 셀렉터)
+    const closeBtn = await page.$('.se-help-panel button');
     if (closeBtn) {
       await closeBtn.click({ force: true });
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(600);
     }
-  } catch (_) {
-    // 도움말 패널 없으면 그냥 통과
-  }
+  } catch (_) {}
+  try {
+    // 2) 부모 컨테이너 강제 숨김 (publish-test-dump 검증: se-help-header)
+    await page.evaluate(() => {
+      document.querySelectorAll('[class*="se-help-header"]').forEach(el => {
+        el.style.setProperty('display', 'none', 'important');
+      });
+    });
+    await page.waitForTimeout(300);
+  } catch (_) {}
 }
 
 async function publishToNaver({ title, content, hashtags, relatedPosts, config, category = 'other', autoPublish = false, images = [], scheduledAt = null, naverCategory = '' }) {
