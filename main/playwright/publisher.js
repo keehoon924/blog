@@ -569,21 +569,17 @@ async function dismissDraftPopup(page) {
 // 닫기 버튼 클릭 시도 → 5초 안에 안 사라지면 CSS 강제 숨김
 async function dismissHelpPanel(page) {
   try {
-    // 1) 버튼 클릭 시도 (publish-test-dump 검증 셀렉터)
-    const closeBtn = await page.$('.se-help-panel button');
-    if (closeBtn) {
-      await closeBtn.click({ force: true });
-      await page.waitForTimeout(600);
-    }
-  } catch (_) {}
-  try {
-    // 2) 부모 컨테이너 강제 숨김 (publish-test-dump 검증: se-help-header)
     await page.evaluate(() => {
-      document.querySelectorAll('[class*="se-help-header"]').forEach(el => {
-        el.style.setProperty('display', 'none', 'important');
+      // 1) 닫기 버튼 직접 클릭 이벤트 강제 발생
+      const btn = document.querySelector('button.se-help-panel-close-button');
+      if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+
+      // 2) 패널 부모 강제 숨김
+      ['se-help-header', 'se-help-header-dark'].forEach(cls => {
+        document.querySelectorAll('.' + cls).forEach(el => el.style.setProperty('display', 'none', 'important'));
       });
     });
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(800);
   } catch (_) {}
 }
 
@@ -712,20 +708,20 @@ async function publishBatch(posts, config, onProgress) {
       await dismissDraftPopup(page);
       await page.waitForTimeout(800);
 
-      // 제목 입력 (에디터 열리면 제목 영역 기본 포커스)
-      const titleEl = await page.$('.se-title-text');
-      if (titleEl) {
-        await titleEl.click({ force: true });
-        await page.waitForTimeout(400);
-        await page.keyboard.press('Control+a');
-        await page.keyboard.press('Backspace');
-        await page.waitForTimeout(200);
-        for (const char of post.title) {
-          await page.keyboard.type(char);
-          await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
-        }
-        await page.waitForTimeout(500);
+      // 제목 입력 — evaluate로 직접 포커스 강제 지정
+      await page.evaluate(() => {
+        const el = document.querySelector('.se-title-text');
+        if (el) el.focus();
+      });
+      await page.waitForTimeout(400);
+      await page.keyboard.press('Control+a');
+      await page.keyboard.press('Backspace');
+      await page.waitForTimeout(200);
+      for (const char of post.title) {
+        await page.keyboard.type(char);
+        await page.waitForTimeout(20 + Math.floor(Math.random() * 30));
       }
+      await page.waitForTimeout(500);
 
       // [2] 본문 단락 클릭
       const bodyEl = await page.$('.se-text-paragraph');
