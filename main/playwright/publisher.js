@@ -419,15 +419,19 @@ async function autoFinalizePublish(page) {
   try { await page.waitForTimeout(5000); } catch (_) {}
 }
 
-// layer_popup 드롭다운 강제 닫기 (layer_publish 다이얼로그 제외)
+// layer_popup 드롭다운 강제 닫기 (layer_publish 다이얼로그 제외) — 모든 프레임
 async function forceCloseLayerPopup(page) {
-  await page.evaluate(() => {
-    document.querySelectorAll('[class*="layer_popup"]').forEach(el => {
-      if (el.className.includes('layer_publish')) return;
-      [...el.classList].filter(c => c.includes('is_show')).forEach(c => el.classList.remove(c));
-      el.style.display = 'none';
-    });
-  });
+  for (const frame of page.frames()) {
+    try {
+      await frame.evaluate(() => {
+        document.querySelectorAll('[class*="layer_popup"]').forEach(el => {
+          if (el.className.includes('layer_publish')) return;
+          [...el.classList].filter(c => c.includes('is_show')).forEach(c => el.classList.remove(c));
+          el.style.display = 'none';
+        });
+      });
+    } catch (_) {}
+  }
   await page.waitForTimeout(400);
 }
 
@@ -584,14 +588,24 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
   try { await page.waitForTimeout(5000); } catch (_) {}
 }
 
-// '작성 중인 글이 있습니다' 팝업이 뜨면 '취소' 클릭 (새 글로 시작)
+// '작성 중인 글이 있습니다' 팝업이 뜨면 '취소' 클릭 (새 글로 시작) — 모든 프레임 탐색
 async function dismissDraftPopup(page) {
   try {
-    await page.evaluate(() => {
-      document.querySelectorAll('button').forEach(b => {
-        if (b.textContent.trim() === '취소' && b.closest('.se-popup-container')) b.click();
-      });
-    });
+    for (const frame of page.frames()) {
+      try {
+        const clicked = await frame.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('button'));
+          // .se-popup-container 안 취소 버튼 우선
+          let btn = btns.find(b => b.textContent.trim() === '취소' && b.closest('.se-popup-container'));
+          // 없으면 화면에 보이는 취소 버튼
+          if (!btn) btn = btns.find(b => b.textContent.trim() === '취소' && b.offsetParent !== null);
+          if (btn) { btn.click(); return true; }
+          return false;
+        });
+        if (clicked) break;
+      } catch (_) {}
+    }
+    await page.waitForTimeout(500);
   } catch (_) {}
 }
 
