@@ -320,14 +320,9 @@ async function doLogin(page, id, pw) {
   await page.goto('https://section.blog.naver.com/BlogHome.naver', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1500);
 
-  // 초록 로그인 버튼 클릭 (우측 사이드바 NAVER 로그인 버튼)
-  const loginBtn = await page.$('a.btn_login, a[href*="nidlogin"], .btn_naver_login, a.link_login');
-  if (loginBtn) {
-    await loginBtn.click();
-  } else {
-    // 버튼 못 찾으면 직접 로그인 URL로 이동
-    await page.goto('https://nid.naver.com/nidlogin.login?mode=form&url=https://www.naver.com/', { waitUntil: 'domcontentloaded' });
-  }
+  // 초록 NAVER 로그인 버튼 클릭
+  await page.waitForSelector('a.login_button', { timeout: 10000 });
+  await page.click('a.login_button');
 
   // 로그인 폼 대기
   await page.waitForSelector('#id', { timeout: 15000 });
