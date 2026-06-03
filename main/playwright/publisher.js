@@ -803,13 +803,48 @@ async function publishBatch(posts, config, onProgress) {
     const post = posts[i];
     if (onProgress) onProgress(i, total, post.title, 'start');
     try {
-      // 예약 발행 후 네이버가 페이지를 닫을 수 있음 — 닫혀 있으면 새 페이지 생성
-      if (page.isClosed()) {
-        page = await context.newPage();
+      if (i === 0) {
+        // 첫 글: GoBlogWrite.naver 직접 이동
+        if (page.isClosed()) page = await context.newPage();
+        page.once('dialog', dialog => dialog.accept().catch(() => {}));
+        await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      } else {
+        // 두 번째 글부터: 발행 완료 후 프롤로그 → 글쓰기 클릭 (클릭 기록 방식)
+        if (page.isClosed()) {
+          page = await context.newPage();
+          page.once('dialog', dialog => dialog.accept().catch(() => {}));
+          await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        } else {
+          // 프롤로그 클릭
+          await evalInFrames(page, () => {
+            const links = Array.from(document.querySelectorAll('a'));
+            const prologue = links.find(a => a.textContent.trim() === '프롤로그');
+            if (prologue) { prologue.click(); return true; }
+            return false;
+          });
+          await page.waitForTimeout(2000);
+
+          // 글쓰기 클릭
+          const writeClicked = await evalInFrames(page, () => {
+            const links = Array.from(document.querySelectorAll('a'));
+            const write = links.find(a => a.textContent.trim() === '글쓰기');
+            if (write) { write.click(); return true; }
+            return false;
+          });
+          if (!writeClicked) {
+            // 글쓰기 못 찾으면 직접 URL 이동
+            page.once('dialog', dialog => dialog.accept().catch(() => {}));
+            await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          } else {
+            // 새 탭으로 열렸을 수 있음 — 가장 최근 페이지 사용
+            await page.waitForTimeout(2000);
+            const pages = page.context().pages();
+            if (pages.length > 1) {
+              page = pages[pages.length - 1];
+            }
+          }
+        }
       }
-      // 페이지 이동 시 "떠나겠습니까?" 다이얼로그 자동 수락
-      page.once('dialog', dialog => dialog.accept().catch(() => {}));
-      await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(3000);
 
       // 메인 + 모든 하위 프레임 목록 (에디터가 iframe 안에 있을 수 있음)
