@@ -435,35 +435,29 @@ async function forceCloseLayerPopup(page) {
   await page.waitForTimeout(400);
 }
 
-// 다이얼로그 내 발행 확인 버튼 클릭 (confirm_btn__WEaBq)
-// page.mouse.click(실제좌표) — 도움말 닫기와 동일한 방식
+// 다이얼로그 내 발행 확인 버튼 클릭 (confirm_btn__WEaBq) — evaluate 직접 click()
 async function clickDialogPublishBtn(page) {
-  const found = await waitInFrames(page, 'button.confirm_btn__WEaBq', 8000);
-  const box = await found.el.boundingBox();
-  if (box) {
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    console.log(`[발행 버튼] mouse.click (${Math.round(box.x + box.width/2)}, ${Math.round(box.y + box.height/2)})`);
-  } else {
-    await found.el.click({ force: true });
-    console.log('[발행 버튼] click({force:true}) fallback');
-  }
-
-  await page.waitForTimeout(3000);
-
-  // 다이얼로그가 아직 열려있으면 재시도
-  const stillOpen = await evalInFrames(page, () => {
-    const r = document.querySelector('input#radio_time2');
-    return r ? r.getBoundingClientRect().width > 0 : false;
-  });
-  if (stillOpen) {
-    console.warn('[발행 버튼] 다이얼로그 여전히 열림 — 재시도');
-    const found2 = await findInFrames(page, 'button.confirm_btn__WEaBq');
-    if (found2) {
-      const box2 = await found2.el.boundingBox();
-      if (box2) await page.mouse.click(box2.x + box2.width / 2, box2.y + box2.height / 2);
-      else await found2.el.click({ force: true });
+  // 최대 3회 시도
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const clicked = await evalInFrames(page, () => {
+      const btn = document.querySelector('button.confirm_btn__WEaBq');
+      if (btn) { btn.click(); return true; }
+      return false;
+    });
+    if (clicked) {
+      console.log(`[발행 버튼] evaluate click() 성공 (시도 ${attempt + 1})`);
+      await page.waitForTimeout(3000);
+      // 다이얼로그 닫혔으면 완료
+      const stillOpen = await evalInFrames(page, () => {
+        const r = document.querySelector('input#radio_time2');
+        return r ? r.getBoundingClientRect().width > 0 : false;
+      });
+      if (!stillOpen) return { clicked: true };
+      console.warn('[발행 버튼] 다이얼로그 아직 열림 — 재시도');
+    } else {
+      console.warn(`[발행 버튼] 버튼 못 찾음 — 재시도 (${attempt + 1})`);
+      await page.waitForTimeout(1000);
     }
-    await page.waitForTimeout(3000);
   }
   return { clicked: true };
 }
@@ -605,23 +599,31 @@ async function autoFinalizeScheduledPublish(page, scheduledAt, naverCategory = '
   if (!dayResult || dayResult.error) throw new Error(dayResult?.error || '날짜 클릭 실패');
   await page.waitForTimeout(800);
 
-  // 7) 시간 select — evaluate 기반
+  // 7) 시간 select — React 호환 네이티브 setter + input/change 이벤트 모두 발사
   await evalInFrames(page, (h) => {
     const sel = document.querySelector('select.hour_option__J_heO');
-    if (sel) { sel.value = h; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; }
-    return false;
+    if (!sel) return false;
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    nativeSetter.call(sel, h);
+    sel.dispatchEvent(new Event('input',  { bubbles: true }));
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
   }, String(targetHour).padStart(2, '0'));
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(500);
 
-  // 8) 분 select — evaluate 기반
+  // 8) 분 select — 동일 방식
   await evalInFrames(page, (m) => {
     const sel = document.querySelector('select.minute_option__Vb3xB');
-    if (sel) { sel.value = m; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; }
-    return false;
+    if (!sel) return false;
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    nativeSetter.call(sel, m);
+    sel.dispatchEvent(new Event('input',  { bubbles: true }));
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
   }, String(targetMinute).padStart(2, '0'));
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(500);
 
-  // 9) 다이얼로그 내 "발행" 버튼 클릭 (robust)
+  // 9) 다이얼로그 내 "발행" 버튼 클릭 — evaluate 직접 click() (좌표 의존 제거)
   await clickDialogPublishBtn(page);
 
   // 예약 등록 완료 대기 — 네이버가 페이지를 닫거나 이동시킬 수 있으므로 try-catch
