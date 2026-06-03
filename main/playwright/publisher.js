@@ -488,8 +488,7 @@ async function selectNaverCategory(page, categoryName) {
         const labels = await frame.$$('label.radio_label__mB6ia');
         for (const lbl of labels) {
           const txt = await lbl.evaluate(el => el.textContent.trim());
-          const visible = await lbl.evaluate(el => el.getBoundingClientRect().height > 0);
-          if (visible && (txt === name || txt.includes(name))) {
+          if (txt === name || txt.includes(name)) {
             targetLabel = lbl;
             targetFrame = frame;
             break;
@@ -502,6 +501,9 @@ async function selectNaverCategory(page, categoryName) {
       await page.keyboard.press('Escape');
       return { error: `"${name}" 없음` };
     }
+    // 스크롤 컨테이너 안에 숨겨진 항목 대비 — scrollIntoView 후 클릭
+    await targetLabel.evaluate(el => el.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+    await page.waitForTimeout(300);
     const lblBox = await targetLabel.boundingBox();
     if (lblBox) {
       await page.mouse.move(lblBox.x + lblBox.width / 2, lblBox.y + lblBox.height / 2);
@@ -511,9 +513,10 @@ async function selectNaverCategory(page, categoryName) {
       await targetLabel.click({ force: true });
     }
     await page.waitForTimeout(500);
-    // radio input도 클릭
-    const radio = await targetFrame.$('input.radio_item__PIBr7');
+    // radio input도 클릭 — 같은 li 안의 radio 찾기
+    const radio = await targetLabel.evaluateHandle(el => el.closest('li')?.querySelector('input.radio_item__PIBr7'));
     if (radio) {
+      await radio.evaluate(el => el.scrollIntoView({ block: 'nearest' }));
       const radioBox = await radio.boundingBox();
       if (radioBox) await page.mouse.click(radioBox.x + radioBox.width / 2, radioBox.y + radioBox.height / 2);
       else await radio.click({ force: true });
